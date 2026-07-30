@@ -1,0 +1,104 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark">
+<title>PROJECT R-5 — Chamber</title>
+<link rel="stylesheet" href="../assets/base.css">
+<link rel="stylesheet" href="../assets/level.css">
+</head>
+<body>
+
+<!-- The grid. Nothing sits on top of it but the four overlays below. -->
+<canvas id="grid"></canvas>
+
+<!-- Status. Text only: state, progress, one metric. -->
+<p class="strip">
+  <span id="strip-state">Loading</span>
+  <span id="strip-progress"></span>
+  <span id="strip-metric"></span>
+  <span id="strip-stale" class="strip-stale" hidden></span>
+</p>
+
+<!-- Generated from the same entity definitions the renderer draws from. -->
+<ul class="legend" id="legend"></ul>
+
+<button type="button" class="nav corner" id="exit"
+        aria-label="Stop and leave the chamber">
+  <span aria-hidden="true">&times;</span>
+</button>
+
+<button type="button" class="nav handle" id="toggle"
+        aria-label="Open the sidebar" aria-expanded="false"
+        aria-controls="sidebar">
+  <span aria-hidden="true" id="toggle-glyph">&lsaquo;</span>
+</button>
+
+<aside class="sidebar" id="sidebar" aria-hidden="true">
+  <header class="sidebar-head">
+    <p class="label" id="room-sector"></p>
+    <h1 id="room-name"></h1>
+  </header>
+
+  <details class="section" id="section-controls" open>
+    <summary>Controls</summary>
+    <div class="section-body">
+      <div class="row">
+        <button type="button" class="btn wide" id="play">Play</button>
+        <button type="button" class="btn" id="step">Step</button>
+        <button type="button" class="btn" id="reset">Reset</button>
+      </div>
+
+      <p class="label">Speed</p>
+      <div class="chips" id="speeds" role="radiogroup" aria-label="Speed"></div>
+      <p class="hint" id="speed-hint"></p>
+
+      <p class="label">Algorithm</p>
+      <select id="algorithm" class="field"></select>
+      <p class="hint">Changing this discards what has been learned.</p>
+    </div>
+  </details>
+
+  <details class="section">
+    <summary>Parameters</summary>
+    <div class="section-body" id="parameters"></div>
+  </details>
+
+  <details class="section">
+    <summary>Level</summary>
+    <div class="section-body" id="level-info"></div>
+  </details>
+
+  <details class="section">
+    <summary>Algorithm</summary>
+    <div class="section-body" id="algorithm-info"></div>
+  </details>
+
+  <!-- Four views of the same sweep sequence. The first is the stopping
+       rule; the other three are what is happening while it approaches it,
+       and all four come out of the snapshots this screen already gets. -->
+  <details class="section">
+    <summary>Analysis</summary>
+    <div class="section-body" id="analysis">
+      <div id="charts"></div>
+      <p class="hint">The dashed line on the first chart is the stopping
+        threshold: the run is finished when the largest change drops below
+        it. The policy usually settles several sweeps before the values do
+        — the fourth chart is where that shows.</p>
+      <dl class="readout" id="readout"></dl>
+    </div>
+  </details>
+</aside>
+
+<!-- The charts are shared with the room screen, and read their sizes and
+     smoothing window from that screen's config. -->
+<script src="../assets/room/config.js"></script>
+<script src="../assets/room/charts.js"></script>
+<!-- Shared with the room screen, so a wall is the same wall in both. -->
+<script src="../assets/shapes.js"></script>
+<script src="../assets/sim.js"></script>
+<script src="../assets/renderer.js"></script>
+<script src="../assets/level.js"></script>
+</body>
+</html>

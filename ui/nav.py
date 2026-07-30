@@ -28,20 +28,34 @@ def rail(current_room=None):
     The current room is highlighted in cyan, cleared rooms in green and locked
     rooms are dimmed.  Every step also spells its status out in words, so the
     rail does not depend on colour alone.
+
+    The chamber sequence and the progress count share one band, because they are
+    two readings of the same thing and stacking them made three thin strips of
+    small text compete for the same glance.
     """
-    pieces = ['<div class="r5-nav">']
+    done = game_state.solved_count()
+    total = len(story.ROOM_NUMBERS)
+
+    pieces = ['<div class="r5-band"><div class="r5-nav">']
     for number in story.ROOM_NUMBERS:
         status = game_state.room_status(number)
         css_class = STATUS_CLASSES[status]
         if number == current_room and status != game_state.STATUS_LOCKED:
             css_class = "is-current"
         record = story.room(number)
+        # The gauge in the sidebar already names every chamber, so the band only
+        # spells out the one R-5 is standing in and leaves the rest as numbers.
+        name = ('<span class="r5-nav-name">%s</span>' % record["name"]
+                if css_class == "is-current" else "")
         pieces.append(
-            '<div class="r5-nav-step %s">'
-            '<div class="r5-nav-num">Room %d · %s</div>'
-            '<div class="r5-nav-name">%s</div>'
-            '</div>' % (css_class, number, STATUS_MARKS[status], record["name"]))
-    pieces.append("</div>")
+            '<div class="r5-nav-step %s" title="%s — %s">'
+            '<span class="r5-nav-num">%d · %s</span>%s'
+            '</div>' % (css_class, record["name"], STATUS_MARKS[status],
+                        number, STATUS_MARKS[status].split()[0], name))
+    pieces.append('</div>')
+    pieces.append('<div class="r5-label r5-band-progress">%s &nbsp; %d / %d cleared'
+                  '</div>' % ("▰" * done + "▱" * (total - done), done, total))
+    pieces.append('</div>')
     theme.html("".join(pieces))
 
 
@@ -96,19 +110,65 @@ def room_header(room_number, status, status_note="", algorithm=None):
         })
 
 
-def progress_line():
-    """A one-line reminder of how far through the facility the player is."""
-    done = game_state.solved_count()
+def ascent_gauge(current_room=None):
+    """The shaft R-5 is climbing, drawn as a vertical gauge.
+
+    The story of the game is an ascent: sub-level 4 at the bottom, the surface at
+    the top, five chambers in between.  A horizontal breadcrumb says nothing
+    about that, so the sidebar carries the shaft itself — cleared landings
+    filled in, R-5's own landing lit, the ones above it still dark.
+
+    It is an instrument, not a control: the buttons underneath do the moving.
+    """
     total = len(story.ROOM_NUMBERS)
-    filled = "▰" * done + "▱" * (total - done)
-    theme.html('<div class="r5-label" style="text-align:right">'
-               'Facility progress &nbsp;%s&nbsp; %d / %d chambers cleared</div>'
-               % (filled, done, total))
+    done = game_state.solved_count()
+    remaining = total - done
+
+    pieces = ['<div class="r5-gauge">',
+              '<div class="r5-gauge-cap is-surface">↑ Surface · exit gate</div>',
+              '<div class="r5-gauge-shaft">']
+
+    # Top of the shaft is the last room, so the list is drawn downwards.
+    for number in reversed(story.ROOM_NUMBERS):
+        record = story.room(number)
+        status = game_state.room_status(number)
+
+        css_class = "r5-landing"
+        if number == current_room:
+            css_class += " is-here"
+        elif status == game_state.STATUS_SOLVED:
+            css_class += " is-done"
+        elif status == game_state.STATUS_LOCKED:
+            css_class += " is-locked"
+
+        pieces.append(
+            '<div class="%s" title="%s">'
+            '  <div>'
+            '    <div class="r5-landing-name">%d · %s</div>'
+            '    <div class="r5-landing-method">%s</div>'
+            '  </div>'
+            '</div>' % (css_class, STATUS_MARKS[status], number,
+                        record["name"], record["algorithm_short"]))
+
+    pieces.append('</div>')
+    pieces.append('<div class="r5-gauge-cap">↓ Sub-level 4 · charging plate</div>')
+    pieces.append(
+        '<div class="r5-gauge-readout">%s</div>'
+        % ("Surface reached" if remaining == 0 else
+           "<b>%d</b> of %d chambers to the surface" % (remaining, total)))
+    pieces.append('</div>')
+
+    st.sidebar.markdown("".join(pieces), unsafe_allow_html=True)
 
 
 def sidebar_navigation(current_room):
-    """Buttons in the sidebar for jumping between unlocked rooms."""
-    st.sidebar.markdown('<div class="r5-label">Facility map</div>',
+    """Buttons in the sidebar for jumping between unlocked rooms.
+
+    The gauge that shows where these lead is drawn by `app.py` at the top of the
+    sidebar, so it stays above each room's own controls instead of being pushed
+    below them.
+    """
+    st.sidebar.markdown('<div class="r5-label">Move to chamber</div>',
                         unsafe_allow_html=True)
     for number in story.ROOM_NUMBERS:
         record = story.room(number)

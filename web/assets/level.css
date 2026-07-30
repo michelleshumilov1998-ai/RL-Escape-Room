@@ -1,0 +1,340 @@
+/* =====================================================================
+   The level screen.
+
+   Full viewport, no scroll. The canvas has the whole area; four things
+   sit on top of it and nothing else:
+
+     the status strip      top left
+     the legend            bottom left   (opposite the sidebar)
+     the exit button       top right     (nearest the sidebar handle)
+     the sidebar handle    right edge, vertically centred
+
+   The sidebar overlays the canvas rather than resizing it, and the grid
+   re-fits underneath so nothing important ends up behind it.
+   ===================================================================== */
+
+:root {
+  --sidebar-width: min(23rem, 84vw);
+  --sidebar-ms: 200ms;
+  --overlay-gap: clamp(0.9rem, 2vw, 1.6rem);
+}
+
+#grid {
+  position: fixed;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  display: block;
+  z-index: 0;
+}
+
+/* ---- status strip --------------------------------------------------- */
+
+.strip {
+  position: fixed;
+  top: var(--overlay-gap);
+  left: var(--overlay-gap);
+  z-index: 3;
+  margin: 0;
+  display: flex;
+  gap: 1.4rem;
+  align-items: baseline;
+  font-size: clamp(0.68rem, 0.92vw, 0.78rem);
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--hairline);
+  pointer-events: none;
+}
+
+#strip-state { color: var(--muted); }
+#strip-metric { font-family: var(--mono); letter-spacing: 0.06em; }
+.strip-stale { color: var(--hazard); letter-spacing: 0.1em; }
+
+/* ---- legend --------------------------------------------------------- *
+   No panel, no border, no title — but fully lit.
+
+   It used to sit at 40% and come up to full on hover. That is the right
+   treatment for something you consult occasionally, and the wrong one
+   here: the swatches are drawn by the renderer's own shape recipes, so
+   dimming the list dims the icons themselves, and a key you cannot read
+   until you point at it is not doing its job.                           */
+
+.legend {
+  position: fixed;
+  bottom: var(--overlay-gap);
+  left: var(--overlay-gap);
+  z-index: 3;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.legend li {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  font-size: clamp(0.62rem, 0.85vw, 0.72rem);
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--muted);
+}
+
+/* A swatch is a canvas, drawn by the renderer's own shape recipes, so the
+   key shows the same masonry, ice and beams the grid does. */
+.legend .swatch { display: block; width: 15px; height: 15px; flex: none; }
+
+/* ---- the two pinned buttons ----------------------------------------- */
+
+.corner {
+  position: fixed;
+  top: var(--overlay-gap);
+  right: var(--overlay-gap);
+  z-index: 5;
+  width: 2.4rem;
+  height: 2.4rem;
+  font-size: 1rem;
+}
+
+.handle {
+  position: fixed;
+  top: 50%;
+  right: 0;
+  transform: translateY(-50%);
+  z-index: 5;
+  width: 1.8rem;
+  height: 3.4rem;
+  border-right: 0;
+  border-radius: 2px 0 0 2px;
+  transition: border-color 170ms ease, color 170ms ease,
+              background-color 170ms ease, right var(--sidebar-ms) ease;
+}
+
+body.is-open .handle { right: var(--sidebar-width); }
+body.is-open .corner { right: calc(var(--sidebar-width) + var(--overlay-gap)); }
+
+.corner { transition: border-color 170ms ease, color 170ms ease,
+                      background-color 170ms ease, right var(--sidebar-ms) ease; }
+
+/* ---- sidebar -------------------------------------------------------- */
+
+.sidebar {
+  position: fixed;
+  top: 0;
+  right: 0;
+  z-index: 4;
+  width: var(--sidebar-width);
+  height: 100%;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 1.4rem 1.3rem 3rem 1.3rem;
+  background: color-mix(in srgb, var(--base) 94%, var(--muted));
+  border-left: 1px solid var(--hairline-faint);
+  transform: translateX(100%);
+  transition: transform var(--sidebar-ms) ease;
+}
+
+body.is-open .sidebar { transform: translateX(0); }
+
+.sidebar-head { margin-bottom: 1.2rem; }
+
+.sidebar-head h1 {
+  margin: 0.35rem 0 0 0;
+  font-size: 1.05rem;
+  font-weight: 300;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--title);
+}
+
+/* ---- sections ------------------------------------------------------- */
+
+.section { border-top: 1px solid var(--hairline-faint); }
+
+.section summary {
+  padding: 0.85rem 0;
+  cursor: pointer;
+  font-size: 0.7rem;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: var(--muted);
+  list-style: none;
+}
+
+.section summary::-webkit-details-marker { display: none; }
+
+.section summary::after {
+  content: "+";
+  float: right;
+  color: var(--hairline);
+}
+
+.section[open] summary::after { content: "\2212"; }
+.section summary:focus-visible { outline: 1px solid var(--accent); outline-offset: 2px; }
+
+.section-body {
+  padding-bottom: 1.2rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.7rem;
+}
+
+.row { display: flex; gap: 0.5rem; }
+
+.row .btn {
+  flex: 1;
+  padding: 0.75em 0.4em;
+  font-size: 0.68rem;
+  letter-spacing: 0.12em;
+}
+
+.row .btn.wide { flex: 1.5; }
+
+.hint {
+  margin: 0;
+  font-size: 0.68rem;
+  line-height: 1.5;
+  color: var(--hairline-soft);
+  letter-spacing: 0.02em;
+  text-transform: none;
+}
+
+/* ---- speed chips ---------------------------------------------------- */
+
+.chips { display: flex; gap: 0.35rem; }
+
+.chip {
+  flex: 1;
+  font-family: inherit;
+  font-size: 0.64rem;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  padding: 0.55em 0.2em;
+  color: var(--hairline);
+  background: transparent;
+  border: 1px solid var(--hairline-faint);
+  border-radius: 2px;
+  cursor: pointer;
+  transition: color 150ms ease, border-color 150ms ease,
+              background-color 150ms ease;
+}
+
+.chip:hover { color: var(--accent); border-color: var(--hairline); }
+.chip:focus-visible { outline: 1px solid var(--accent); outline-offset: 2px; }
+
+.chip[aria-checked="true"] {
+  color: var(--accent);
+  border-color: var(--accent);
+  background: var(--accent-wash);
+}
+
+/* ---- fields --------------------------------------------------------- */
+
+.field {
+  width: 100%;
+  font-family: inherit;
+  font-size: 0.74rem;
+  padding: 0.55em 0.6em;
+  color: var(--muted);
+  background: color-mix(in srgb, var(--base) 82%, var(--muted));
+  border: 1px solid var(--hairline-faint);
+  border-radius: 2px;
+}
+
+.field:focus-visible { outline: 1px solid var(--accent); outline-offset: 2px; }
+
+/* ---- parameters ----------------------------------------------------- */
+
+.group-label {
+  margin: 0.4rem 0 0 0;
+  font-size: 0.62rem;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--hairline-soft);
+}
+
+.group-label.is-reset { color: color-mix(in srgb, var(--hazard), var(--muted) 45%); }
+
+.parameter { display: flex; flex-direction: column; gap: 0.3rem; }
+
+.parameter-head {
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
+  font-size: 0.7rem;
+  letter-spacing: 0.06em;
+  color: var(--muted);
+}
+
+.parameter-value {
+  margin-left: auto;
+  font-family: var(--mono);
+  font-size: 0.72rem;
+  color: var(--accent);
+}
+
+.parameter-default {
+  font-family: inherit;
+  font-size: 0.6rem;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--hairline-soft);
+  background: none;
+  border: 0;
+  padding: 0;
+  cursor: pointer;
+}
+
+.parameter-default:hover { color: var(--accent); }
+.parameter-default:focus-visible { outline: 1px solid var(--accent); outline-offset: 2px; }
+
+input[type="range"] {
+  width: 100%;
+  accent-color: var(--accent);
+  background: transparent;
+}
+
+input[type="range"]:focus-visible { outline: 1px solid var(--accent); outline-offset: 3px; }
+
+/* ---- level and algorithm info --------------------------------------- */
+
+.info-block { display: flex; flex-direction: column; gap: 0.3rem; }
+.info-block p { margin: 0; font-size: 0.72rem; line-height: 1.6; color: var(--hairline); }
+.info-block ul { margin: 0; padding-left: 1.1rem; }
+.info-block li { font-size: 0.72rem; line-height: 1.6; color: var(--hairline); }
+
+.rule {
+  margin: 0;
+  padding: 0.6rem 0.7rem;
+  font-family: var(--mono);
+  font-size: 0.7rem;
+  line-height: 1.5;
+  color: var(--accent);
+  background: color-mix(in srgb, var(--base) 84%, var(--muted));
+  border-left: 1px solid var(--accent);
+  overflow-x: auto;
+}
+
+.rewards { width: 100%; border-collapse: collapse; font-size: 0.7rem; }
+.rewards td { padding: 0.28rem 0; color: var(--hairline); border-bottom: 1px solid var(--hairline-faint); }
+.rewards td:last-child { text-align: right; font-family: var(--mono); color: var(--muted); }
+
+/* ---- analysis ------------------------------------------------------- */
+
+.curve {
+  width: 100%;
+  height: 92px;
+  display: block;
+  background: color-mix(in srgb, var(--base) 86%, var(--muted));
+  border: 1px solid var(--hairline-faint);
+}
+
+.readout { margin: 0; display: grid; grid-template-columns: 1fr auto; gap: 0.25rem 0.6rem; }
+.readout dt { font-size: 0.68rem; color: var(--hairline-soft); letter-spacing: 0.06em; }
+.readout dd { margin: 0; font-family: var(--mono); font-size: 0.7rem; color: var(--muted); text-align: right; }
+
+@media (prefers-reduced-motion: reduce) {
+  .sidebar, .handle, .corner, .chip { transition: none; }
+}

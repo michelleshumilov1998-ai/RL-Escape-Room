@@ -1,0 +1,152 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark">
+<title>PROJECT R-5 — Chamber</title>
+<link rel="stylesheet" href="../assets/base.css">
+<link rel="stylesheet" href="../assets/level.css">
+<link rel="stylesheet" href="../assets/room/room.css">
+</head>
+<body>
+
+<!-- The world. Nothing sits on top of it but the four overlays below. -->
+<canvas id="world"></canvas>
+
+<!-- Status. Text only: how far through, the run state, one metric. -->
+<p class="strip">
+  <span id="strip-episodes"></span>
+  <span id="strip-state">Idle</span>
+  <span id="strip-metric"></span>
+  <!-- Shown the moment one episode actually gets out, because that is
+       what unlocks the next chamber and it was otherwise invisible. -->
+  <span id="strip-cleared" class="strip-cleared" hidden></span>
+  <span id="strip-stale" class="strip-stale" hidden></span>
+</p>
+
+<!-- Generated from the room's entity types, never hand-written. -->
+<ul class="legend" id="legend"></ul>
+
+<button type="button" class="nav corner" id="exit"
+        aria-label="Stop and leave the chamber">
+  <span aria-hidden="true">&times;</span>
+</button>
+
+<button type="button" class="nav handle" id="toggle"
+        aria-label="Open the sidebar" aria-expanded="false"
+        aria-controls="sidebar">
+  <span aria-hidden="true" id="toggle-glyph">&lsaquo;</span>
+</button>
+
+<aside class="sidebar" id="sidebar" aria-hidden="true">
+  <header class="sidebar-head">
+    <p class="label" id="room-sector"></p>
+    <h1 id="room-name"></h1>
+  </header>
+
+  <details class="section" open>
+    <summary>Controls</summary>
+    <div class="section-body">
+      <div class="row">
+        <button type="button" class="btn wide" id="play">Play</button>
+        <button type="button" class="btn" id="step">Step</button>
+        <button type="button" class="btn" id="reset">Reset</button>
+      </div>
+
+      <!-- The point of the whole screen: what did it end up doing. Kept
+           out of the row above because it is not a transport control —
+           it jumps to the last route that worked and plays it. -->
+      <div class="row">
+        <button type="button" class="btn wide" id="final-route">
+          Show final route
+        </button>
+      </div>
+      <p class="hint" id="final-route-hint"></p>
+
+      <p class="label">Speed</p>
+      <div class="chips" id="speeds" role="radiogroup" aria-label="Speed"></div>
+      <p class="hint" id="speed-hint"></p>
+    </div>
+  </details>
+
+  <!-- Built entirely from the room's parameterSchema. Adding a parameter
+       later is a change to that array and to nothing here. -->
+  <details class="section">
+    <summary>Parameters</summary>
+    <div class="section-body" id="parameters"></div>
+  </details>
+
+  <details class="section">
+    <summary>Room info</summary>
+    <div class="section-body" id="room-info"></div>
+  </details>
+
+  <!-- A shell reading placeholder text. The content arrives with the
+       algorithm layer; the section is here so the sidebar's shape is
+       already settled. -->
+  <details class="section">
+    <summary>Algorithm</summary>
+    <div class="section-body" id="algorithm-info"></div>
+  </details>
+
+  <details class="section">
+    <summary>Charts</summary>
+    <div class="section-body" id="charts"></div>
+  </details>
+
+  <details class="section">
+    <summary>Episode replay</summary>
+    <div class="section-body">
+      <div class="episodes" id="episode-list"></div>
+      <div id="episode-detail"></div>
+
+      <input type="range" id="scrub" min="0" max="1000" value="0" step="1"
+             aria-label="Scrub through the episode" hidden>
+
+      <div class="row" id="replay-controls" hidden>
+        <button type="button" class="btn wide" id="replay-play">Play</button>
+        <button type="button" class="btn" id="replay-step">Step</button>
+        <button type="button" class="btn" id="replay-exit">Close</button>
+      </div>
+    </div>
+  </details>
+
+  <!-- Reconstruction rather than playback: any episode, any single step,
+       held still, with everything that was true at that moment. It reads
+       the batch and changes nothing, so it can be scrubbed mid-run. -->
+  <details class="section">
+    <summary>Step replay</summary>
+    <div class="section-body">
+      <p class="label">Episode</p>
+      <select id="inspect-episode" class="field"
+              aria-label="Episode to reconstruct"></select>
+
+      <p class="label">Step <span class="inspect-count" id="inspect-count"></span></p>
+      <input type="range" id="inspect-step" min="0" max="0" value="0" step="1"
+             aria-label="Step within the episode">
+      <div class="row">
+        <button type="button" class="btn" id="inspect-back">&lsaquo; Step</button>
+        <button type="button" class="btn" id="inspect-forward">Step &rsaquo;</button>
+      </div>
+
+      <canvas id="inspect-grid" class="inspect-grid"></canvas>
+      <dl class="readout" id="inspect-readout"></dl>
+      <p class="hint" id="inspect-empty"></p>
+    </div>
+  </details>
+</aside>
+
+<!-- Order matters: the contract and the config are read by everything
+     else, and the shell boots on load. -->
+<script src="../assets/room/config.js"></script>
+<script src="../assets/room/contract.js"></script>
+<!-- Shared with room 1's screen, so a wall is the same wall in both. -->
+<script src="../assets/shapes.js"></script>
+<script src="../assets/room/renderer.js"></script>
+<script src="../assets/room/charts.js"></script>
+<script src="../assets/room/playback.js"></script>
+<script src="../assets/room/mock.js"></script>
+<script src="../assets/room/shell.js"></script>
+</body>
+</html>

@@ -1,0 +1,54 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark">
+<title>PROJECT R-5 — Chambers</title>
+<link rel="stylesheet" href="../assets/base.css">
+<link rel="stylesheet" href="../assets/levels.css">
+</head>
+<body>
+
+<!-- Ambience only. Behind everything, never takes a click. -->
+<canvas id="scene" aria-hidden="true"></canvas>
+
+<!-- The way back out. Pinned rather than in the column, so it is never
+     part of the three-control rhythm of browsing chambers. A word rather
+     than an arrow, because both arrows already mean something here. -->
+<button type="button" class="btn back" id="back">Main menu</button>
+
+<main class="stage" id="stage">
+
+  <!-- Position. Counts all five chambers whether they are open or not. -->
+  <header class="meter">
+    <p class="count" id="count">01 / 05</p>
+    <div class="dots" id="dots" aria-hidden="true"></div>
+  </header>
+
+  <section class="level">
+    <div class="art" id="art" aria-hidden="true"></div>
+    <h1 class="name" id="name"></h1>
+    <p class="method" id="method"></p>
+    <p class="blurb" id="blurb"></p>
+  </section>
+
+  <!-- The three interactive elements on this screen, and no others. -->
+  <nav class="controls">
+    <button type="button" class="nav" id="prev" aria-label="Previous chamber">
+      <span aria-hidden="true">&lsaquo;</span>
+    </button>
+    <button type="button" class="btn" id="enter">Enter</button>
+    <button type="button" class="nav" id="next" aria-label="Next chamber">
+      <span aria-hidden="true">&rsaquo;</span>
+    </button>
+  </nav>
+
+  <!-- Always present, so nothing shifts when it has something to say. -->
+  <p class="note" id="note" aria-live="polite"></p>
+
+</main>
+
+<script src="../assets/levels.js"></script>
+</body>
+</html>

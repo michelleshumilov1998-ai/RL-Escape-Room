@@ -1,0 +1,125 @@
+/* =====================================================================
+   The start screen.
+
+   The palette, the reset and the button primitives come from base.css;
+   what is here is only what belongs to this screen.
+   ===================================================================== */
+
+:root {
+  /* The title's tracking, kept in one place: it also has to be cancelled
+     off the right edge so the letters stay optically centred. */
+  --title-track: 0.24em;
+}
+
+/* ---- the vignette -------------------------------------------------- *
+   A pool of base colour under the middle of the screen, so the type holds
+   its contrast whatever the animation happens to be doing behind it.     */
+
+body::after {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: 1;
+  pointer-events: none;
+  background: radial-gradient(ellipse 68% 54% at 50% 46%,
+              color-mix(in srgb, var(--base) 92%, transparent) 0%,
+              color-mix(in srgb, var(--base) 74%, transparent) 46%,
+              color-mix(in srgb, var(--base) 0%, transparent) 78%);
+}
+
+/* ---- the centred column -------------------------------------------- */
+
+.stage {
+  position: relative;
+  z-index: 2;
+  min-height: 100vh;
+  min-height: 100dvh;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: clamp(3.5rem, 9vh, 7rem);
+  padding: 2rem;
+}
+
+.title {
+  margin: 0 calc(var(--title-track) * -1) 0 0;
+  font-size: clamp(2.1rem, 7.4vw, 5.4rem);
+  font-weight: 200;
+  letter-spacing: var(--title-track);
+  text-transform: uppercase;
+  text-align: center;
+  line-height: 1.05;
+  color: var(--muted);
+  color: var(--title);
+}
+
+.actions {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: clamp(1rem, 2.4vh, 1.6rem);
+}
+
+/* START is the visual priority; ABOUT sits behind it, but only just. */
+.btn--start {
+  font-size: clamp(0.8rem, 1.15vw, 0.95rem);
+  padding: 1.05em 3.6em;
+}
+
+.btn--about {
+  font-size: clamp(0.72rem, 1vw, 0.84rem);
+  padding: 0.95em 2.9em;
+}
+
+/* ---- the buttons glow ---------------------------------------------- *
+   base.css gives every button a hairline border that lights up on hover.
+   That is right everywhere else, but on this screen the buttons are the
+   only interactive thing on a field that is itself moving, and an unlit
+   hairline is lost in it. So here the border is lit from the start and
+   breathes; hover and focus only push it further, and the transition to
+   that is base.css's, unchanged.
+
+   The glow is written into the keyframes as well as the rule, because an
+   animation replaces the static value while it runs — and the static one
+   still has to be right when the animation is switched off below.       */
+
+.actions .btn {
+  border-color: color-mix(in srgb, var(--accent) 42%, var(--hairline));
+  box-shadow: 0 0 14px -3px color-mix(in srgb, var(--accent) 40%, transparent),
+              inset 0 0 12px -8px color-mix(in srgb, var(--accent) 30%, transparent);
+  animation: breathe 4.8s ease-in-out infinite;
+}
+
+.actions .btn:hover:not(:disabled),
+.actions .btn:focus-visible {
+  border-color: var(--accent);
+  box-shadow: 0 0 22px -2px color-mix(in srgb, var(--accent) 62%, transparent),
+              inset 0 0 18px -8px color-mix(in srgb, var(--accent) 46%, transparent);
+  /* Held bright rather than pulsing while it is being pointed at. */
+  animation: none;
+}
+
+/* ABOUT keeps its lower standing: the same glow, dimmer, and out of phase
+   so the pair does not throb in unison. */
+.actions .btn--about {
+  border-color: color-mix(in srgb, var(--accent) 26%, var(--hairline));
+  animation-delay: -2.4s;
+  opacity: 0.88;
+}
+
+@keyframes breathe {
+  0%, 100% {
+    box-shadow: 0 0 12px -4px color-mix(in srgb, var(--accent) 32%, transparent),
+                inset 0 0 12px -9px color-mix(in srgb, var(--accent) 24%, transparent);
+  }
+  50% {
+    box-shadow: 0 0 20px -2px color-mix(in srgb, var(--accent) 52%, transparent),
+                inset 0 0 16px -8px color-mix(in srgb, var(--accent) 38%, transparent);
+  }
+}
+
+/* Still lit, just no longer breathing. */
+@media (prefers-reduced-motion: reduce) {
+  .actions .btn { animation: none; }
+}

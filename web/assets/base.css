@@ -1,0 +1,181 @@
+/* =====================================================================
+   PROJECT R-5 — the shared foundation
+   =====================================================================
+
+   The palette, the reset, and the primitives every screen uses.  Each
+   screen adds one stylesheet of its own on top of this and repeats
+   nothing.  The scripts read these same custom properties through
+   getComputedStyle, so no colour is written down twice anywhere.
+
+     --base    near-black. The page, and the silhouettes.
+     --muted   the one mid-tone: borders, labels, structure.
+     --accent  the agent, and laser light. Used sparingly.
+
+   Plus the two semantic colours the level screens need — a goal and a
+   hazard have to be told apart at a glance, and no arrangement of the
+   three above does that honestly.
+   ===================================================================== */
+
+:root {
+  --base: #07090C;
+  --muted: #7C8797;
+  --accent: #38D9FF;
+
+  --goal: #32E875;
+  --hazard: #FF3B5C;
+
+  /* Derived, not new: tints and washes of the above. */
+  --title: color-mix(in srgb, var(--muted), #FFFFFF 30%);
+  --hairline: color-mix(in srgb, var(--muted), var(--base) 38%);
+  --hairline-soft: color-mix(in srgb, var(--muted), var(--base) 62%);
+  --hairline-faint: color-mix(in srgb, var(--muted), var(--base) 78%);
+  --accent-wash: color-mix(in srgb, var(--accent) 8%, transparent);
+  --accent-wash-deep: color-mix(in srgb, var(--accent) 14%, transparent);
+
+  /* Grid cell colours, referenced by name from game/config.py so the
+     renderer and the legend cannot disagree about them. */
+  --cell-floor: color-mix(in srgb, var(--muted), var(--base) 84%);
+  --cell-wall: color-mix(in srgb, var(--muted), var(--base) 52%);
+  --cell-slippery: color-mix(in srgb, #BFE6F5, var(--base) 62%);
+  --cell-hazard: color-mix(in srgb, var(--hazard), var(--base) 58%);
+  --cell-start: color-mix(in srgb, var(--muted), var(--base) 64%);
+  --cell-goal: color-mix(in srgb, var(--goal), var(--base) 52%);
+
+  --font: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+          "Helvetica Neue", Arial, sans-serif;
+  --mono: "SF Mono", "Cascadia Mono", Consolas, "Liberation Mono", monospace;
+
+  --track: 0.2em;
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  height: 100%;
+  margin: 0;
+  overflow: hidden;
+}
+
+body {
+  background: var(--base);
+  color: var(--muted);
+  font-family: var(--font);
+  -webkit-font-smoothing: antialiased;
+}
+
+/* ---- the background animation layer -------------------------------- */
+
+#scene {
+  position: fixed;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  opacity: 0.5;
+  pointer-events: none;
+  z-index: 0;
+}
+
+/* ---- buttons ------------------------------------------------------- *
+   Ghost by default; hover, active and focus all shift towards the accent
+   and change nothing but colour.                                       */
+
+.btn, .nav {
+  font-family: inherit;
+  font-weight: 400;
+  color: var(--muted);
+  background-color: transparent;
+  border: 1px solid var(--hairline);
+  border-radius: 2px;
+  cursor: pointer;
+  transition: border-color 170ms ease,
+              color 170ms ease,
+              background-color 170ms ease;
+}
+
+.btn {
+  font-size: clamp(0.78rem, 1.1vw, 0.92rem);
+  letter-spacing: var(--track);
+  text-transform: uppercase;
+  padding: 1.05em 2.6em;
+  text-align: center;
+}
+
+.nav {
+  width: 2.9rem;
+  height: 2.9rem;
+  font-size: 1.15rem;
+  line-height: 1;
+  border-color: var(--hairline-soft);
+  display: grid;
+  place-items: center;
+}
+
+.btn:hover:not(:disabled),
+.nav:hover:not(:disabled) {
+  color: var(--accent);
+  border-color: var(--accent);
+  background-color: var(--accent-wash);
+}
+
+.btn:active:not(:disabled),
+.nav:active:not(:disabled) { background-color: var(--accent-wash-deep); }
+
+/* The default ring is replaced, never simply removed. */
+.btn:focus-visible, .nav:focus-visible {
+  color: var(--accent);
+  border-color: var(--accent);
+  background-color: var(--accent-wash);
+  outline: 1px solid var(--accent);
+  outline-offset: 4px;
+}
+
+/* Disabled is the real attribute; this only describes it. */
+.btn:disabled, .nav:disabled {
+  color: var(--hairline-soft);
+  border-color: var(--hairline-faint);
+  background-color: transparent;
+  cursor: default;
+}
+
+/* ---- charts -------------------------------------------------------- *
+   Used by every screen that has a sidebar, so they live here rather than
+   in one screen's stylesheet. No axes are drawn: the label says what the
+   series is, the number says where it is now, and the shape is the point. */
+
+.chart { display: flex; flex-direction: column; gap: 0.25rem; }
+
+.chart-head {
+  display: flex;
+  align-items: baseline;
+  gap: 0.5rem;
+  font-size: 0.66rem;
+  letter-spacing: 0.08em;
+  color: var(--hairline-soft);
+}
+
+.chart-latest {
+  margin-left: auto;
+  font-family: var(--mono);
+  font-size: 0.68rem;
+  color: var(--accent);
+}
+
+.chart-canvas {
+  width: 100%;
+  display: block;
+  background: color-mix(in srgb, var(--base) 86%, var(--muted));
+  border: 1px solid var(--hairline-faint);
+}
+
+/* ---- a label, used on every screen --------------------------------- */
+
+.label {
+  font-size: clamp(0.66rem, 0.9vw, 0.76rem);
+  letter-spacing: var(--track);
+  text-transform: uppercase;
+  color: var(--hairline);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .btn, .nav { transition: none; }
+}

@@ -225,7 +225,7 @@ def render():
     stale = bool(result) and store.get("fingerprint") != _fingerprint(settings)
 
     status = "SOLVED" if game_state.is_solved(ROOM_NUMBER) else (
-        "ACTIVE" if result else "LOCKED")
+        "ACTIVE" if result else "STANDBY")
     if run:
         status = "ESCAPED" if run["success"] else "FAILED"
     note = ""
@@ -237,7 +237,6 @@ def render():
     nav.room_header(ROOM_NUMBER, status, note, algorithm=settings["algorithm"])
     nav.rail(ROOM_NUMBER)
     inventory.bar()
-    nav.progress_line()
 
     if stale:
         st.info("The settings have changed since the agent was trained. Press "

@@ -1,0 +1,214 @@
+/* =====================================================================
+   The chamber select screen.
+
+   The palette, the reset and the button primitives come from base.css.
+   ===================================================================== */
+
+:root {
+  /* How a locked chamber is drawn. One place, so the locked and the
+     unlocking states can never disagree about what "locked" looks like. */
+  --locked-art-filter: grayscale(1) brightness(0.55);
+  --locked-art-opacity: 0.42;
+  --locked-text-opacity: 0.5;
+
+  /* How long the locked appearance takes to lift. levels.js overwrites
+     this from CONFIG.unlock.resolveSeconds. */
+  --resolve-ms: 700ms;
+
+  /* The inset of anything pinned to an edge. The level screen defines the
+     same distance for its own overlays; if a third screen needs it, it
+     belongs in base.css rather than in all three. */
+  --overlay-gap: clamp(0.9rem, 2vw, 1.6rem);
+}
+
+body::after {
+  content: "";
+  position: fixed;
+  inset: 0;
+  z-index: 1;
+  pointer-events: none;
+  background: radial-gradient(ellipse 72% 60% at 50% 48%,
+              color-mix(in srgb, var(--base) 92%, transparent) 0%,
+              color-mix(in srgb, var(--base) 76%, transparent) 46%,
+              color-mix(in srgb, var(--base) 0%, transparent) 80%);
+}
+
+/* ---- the column ---------------------------------------------------- */
+
+.stage {
+  position: relative;
+  z-index: 2;
+  min-height: 100vh;
+  min-height: 100dvh;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: clamp(1.4rem, 3.2vh, 2.4rem);
+  padding: 2rem;
+  text-align: center;
+}
+
+/* ---- the way back to the main menu ---------------------------------- *
+   Pinned top left, small, and quieter than ENTER: leaving is always
+   available but it is never the thing being offered.                    */
+
+.back {
+  position: fixed;
+  top: var(--overlay-gap);
+  left: var(--overlay-gap);
+  z-index: 5;
+  font-size: clamp(0.62rem, 0.85vw, 0.7rem);
+  padding: 0.75em 1.5em;
+  border-color: var(--hairline-soft);
+}
+
+/* ---- position indicator -------------------------------------------- */
+
+.meter {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.85rem;
+}
+
+.count {
+  margin: 0 calc(var(--track) * -1) 0 0;
+  font-size: clamp(0.66rem, 0.9vw, 0.76rem);
+  letter-spacing: var(--track);
+  text-transform: uppercase;
+  color: var(--hairline);
+  font-variant-numeric: tabular-nums;
+}
+
+.dots {
+  display: flex;
+  gap: 0.7rem;
+}
+
+/* Indicators, not controls: a dot is never focusable or clickable. */
+.dot {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  border: 1px solid var(--hairline-soft);
+  transition: background-color 160ms ease, border-color 160ms ease;
+}
+
+.dot.is-cleared { background-color: var(--hairline); border-color: var(--hairline); }
+.dot.is-current { background-color: var(--accent); border-color: var(--accent); }
+
+/* ---- the chamber itself -------------------------------------------- */
+
+.level {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 0.9rem;
+  /* Switching chambers is not the moment that earns an animation, so this
+     is a short cross-fade and nothing more. */
+  transition: opacity 120ms ease;
+}
+
+.level.is-swapping { opacity: 0; }
+
+.art {
+  width: clamp(15rem, 34vw, 26rem);
+  aspect-ratio: 8 / 5;
+  margin-bottom: 0.4rem;
+  /* This is the transition the unlock moment rides on: the class comes off
+     and the stylesheet interpolates from the locked look to the resolved
+     one, with no per-frame work in JavaScript. */
+  transition: filter var(--resolve-ms) ease, opacity var(--resolve-ms) ease;
+}
+
+.art svg { display: block; width: 100%; height: 100%; }
+
+.name {
+  margin: 0 calc(var(--track) * -1) 0 0;
+  font-size: clamp(1.4rem, 3.4vw, 2.4rem);
+  font-weight: 200;
+  letter-spacing: var(--track);
+  text-transform: uppercase;
+  line-height: 1.1;
+  color: var(--muted);
+  color: var(--title);
+  transition: opacity var(--resolve-ms) ease;
+}
+
+.method {
+  margin: 0 calc(var(--track) * -1) 0 0;
+  font-size: clamp(0.66rem, 0.92vw, 0.76rem);
+  letter-spacing: var(--track);
+  text-transform: uppercase;
+  color: var(--accent);
+  transition: opacity var(--resolve-ms) ease, color var(--resolve-ms) ease;
+}
+
+.blurb {
+  margin: 0;
+  max-width: 40ch;
+  font-size: clamp(0.8rem, 1.05vw, 0.9rem);
+  line-height: 1.6;
+  color: var(--hairline);
+  transition: opacity var(--resolve-ms) ease;
+}
+
+/* Used for the single frame in which the chamber being unlocked is drawn
+   in its locked state on purpose. Without it, arriving on that chamber
+   would animate *into* the locked look before lifting out of it again. */
+.stage.is-instant .art,
+.stage.is-instant .name,
+.stage.is-instant .method,
+.stage.is-instant .blurb,
+.stage.is-instant .level { transition: none; }
+
+/* Locked: everything still there, just held back. */
+.stage.is-locked .art {
+  filter: var(--locked-art-filter);
+  opacity: var(--locked-art-opacity);
+}
+
+.stage.is-locked .name,
+.stage.is-locked .blurb { opacity: var(--locked-text-opacity); }
+
+.stage.is-locked .method {
+  opacity: var(--locked-text-opacity);
+  color: var(--muted);
+}
+
+/* ---- controls ------------------------------------------------------ */
+
+.controls {
+  display: flex;
+  align-items: center;
+  gap: clamp(0.8rem, 1.6vw, 1.4rem);
+}
+
+.btn {
+  /* Fixed width, so ENTER and LOCKED are the same button at the same size
+     and nothing on the screen moves when a chamber is locked. */
+  width: clamp(11rem, 17vw, 13.5rem);
+  padding: 1.05em 0;
+}
+
+/* ---- the line under the button -------------------------------------- *
+   Always occupies its line, so a locked chamber and an open one are
+   exactly the same height.                                              */
+
+.note {
+  margin: 0;
+  min-height: 1.2em;
+  font-size: clamp(0.68rem, 0.92vw, 0.78rem);
+  letter-spacing: 0.08em;
+  color: var(--hairline-soft);
+  visibility: hidden;
+}
+
+.note.is-shown { visibility: visible; }
+
+@media (prefers-reduced-motion: reduce) {
+  .btn, .nav, .dot, .level, .art, .name, .method, .blurb {
+    transition: none;
+  }
+}

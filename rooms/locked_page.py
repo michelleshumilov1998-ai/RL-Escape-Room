@@ -19,7 +19,6 @@ def render(room_number):
                     algorithm=record["algorithm"])
     nav.rail(room_number)
     inventory.bar()
-    nav.progress_line()
 
     theme.html(
         '<div class="r5-card" style="text-align:center;padding:34px 20px">'

@@ -1,0 +1,156 @@
+/* =====================================================================
+   The room screen.
+
+   This screen loads `level.css` before this file and repeats nothing from
+   it.  The overlay geometry, the sidebar, the sections, the speed chips,
+   the parameter rows, the legend frame and the info blocks are all
+   defined there, and the two screens are meant to be the same screen — so
+   what is here is only the parts this one adds:
+
+     the canvas under a different id
+     the route comparison table
+     the episode browser
+     the step inspector
+
+   The chart styles are in base.css, because room 1's screen uses them
+   too.  Everything is built out of the palette; no colour, size or
+   duration is written down that is not already a custom property or a
+   value in `config.js`.
+   ===================================================================== */
+
+#world {
+  position: fixed;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  display: block;
+  z-index: 0;
+}
+
+/* The strip gains two more fields than room 1's: how far through the batch
+   playback is, and whether the chamber has been cleared. Text only, like
+   the rest of it. */
+#strip-episodes { font-family: var(--mono); letter-spacing: 0.06em; }
+
+.strip-cleared { color: var(--goal); letter-spacing: 0.1em; }
+
+/* ---- the route comparison ------------------------------------------- *
+   For a room that is *about* a choice, the choice stated as a table.    */
+
+.routes {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.66rem;
+}
+
+.routes th {
+  padding: 0.2rem 0.3rem 0.3rem 0;
+  text-align: left;
+  font-weight: 400;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: var(--hairline-soft);
+  border-bottom: 1px solid var(--hairline-faint);
+}
+
+.routes td {
+  padding: 0.3rem 0.3rem 0.3rem 0;
+  color: var(--hairline);
+  border-bottom: 1px solid var(--hairline-faint);
+  vertical-align: top;
+}
+
+.route-name { color: var(--muted); }
+.route-best { font-family: var(--mono); color: var(--goal); }
+.route-risk { font-size: 0.62rem; line-height: 1.4; }
+
+/* ---- the episode browser -------------------------------------------- */
+
+.episodes {
+  display: flex;
+  flex-direction: column;
+  gap: 0.15rem;
+  max-height: 14rem;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+/* A row is a button, because selecting one is an action. Ghost, like
+   every other control on the screen. */
+.episode {
+  display: flex;
+  align-items: baseline;
+  gap: 0.6rem;
+  width: 100%;
+  padding: 0.34rem 0.45rem;
+  font-family: inherit;
+  font-size: 0.68rem;
+  letter-spacing: 0.06em;
+  text-align: left;
+  color: var(--hairline);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 2px;
+  cursor: pointer;
+  transition: color 150ms ease, border-color 150ms ease,
+              background-color 150ms ease;
+}
+
+.episode:hover {
+  color: var(--accent);
+  border-color: var(--hairline-faint);
+  background: var(--accent-wash);
+}
+
+.episode:focus-visible { outline: 1px solid var(--accent); outline-offset: 2px; }
+
+.episode[aria-current="true"] {
+  color: var(--accent);
+  border-color: var(--accent);
+  background: var(--accent-wash);
+}
+
+.episode-index { font-family: var(--mono); color: var(--hairline-soft); }
+.episode-reward { margin-left: auto; font-family: var(--mono); }
+
+/* The outcome is the one place a semantic colour earns its keep in a
+   list: escaped and lost have to be tellable apart at a glance. */
+.episode-outcome { letter-spacing: 0.1em; text-transform: uppercase; font-size: 0.62rem; }
+.episode-outcome.is-success { color: var(--goal); }
+.episode-outcome.is-failure { color: var(--hazard); }
+.episode-outcome.is-timeout { color: var(--hairline-soft); }
+
+/* ---- transports ----------------------------------------------------- */
+
+#scrub, #inspect-step {
+  width: 100%;
+  accent-color: var(--accent);
+  background: transparent;
+}
+
+#scrub:focus-visible,
+#inspect-step:focus-visible { outline: 1px solid var(--accent); outline-offset: 3px; }
+
+/* ---- the step inspector --------------------------------------------- *
+   A still of the room, square, so a 10x10 grid fills it exactly and a
+   room of another shape is letterboxed rather than distorted.           */
+
+.inspect-grid {
+  width: 100%;
+  aspect-ratio: 1 / 1;
+  display: block;
+  background: color-mix(in srgb, var(--base) 88%, var(--muted));
+  border: 1px solid var(--hairline-faint);
+}
+
+.inspect-count {
+  margin-left: 0.4rem;
+  font-family: var(--mono);
+  letter-spacing: 0.04em;
+  color: var(--hairline-soft);
+  text-transform: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .episode { transition: none; }
+}

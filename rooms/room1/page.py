@@ -199,7 +199,7 @@ def render():
     stale = bool(solution) and store.get("fingerprint") != _solver_fingerprint(settings)
 
     status = "SOLVED" if game_state.is_solved(ROOM_NUMBER) else (
-        "ACTIVE" if solution else "LOCKED")
+        "ACTIVE" if solution else "STANDBY")
     if run and run["success"]:
         status = "ESCAPED"
     note = ""
@@ -210,7 +210,6 @@ def render():
                     algorithm=settings["algorithm"])
     nav.rail(ROOM_NUMBER)
     inventory.bar()
-    nav.progress_line()
 
     if stale:
         st.info("The settings have changed since the room was last solved. "
