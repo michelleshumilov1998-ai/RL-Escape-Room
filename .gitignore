@@ -2,10 +2,6 @@
 __pycache__/
 *.pyc
 .pytest_cache/
-.streamlit/secrets.toml
-
-# Saved solver results are local artifacts
-saves/*.json
 
 # PyCharm local state
 .idea/workspace.xml

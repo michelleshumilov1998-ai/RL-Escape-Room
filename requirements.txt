@@ -1,5 +1,4 @@
-streamlit>=1.36
-matplotlib>=3.8
-numpy>=1.26
-pandas>=2.1
+# The application itself needs nothing: `python3 serve.py` runs on the standard
+# library alone, and the browser half is hand-written JavaScript with no build
+# step. This file exists only for the test run.
 pytest>=8.0
