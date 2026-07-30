@@ -65,24 +65,27 @@
     inspectGrid: document.getElementById('inspect-grid'),
     inspectReadout: document.getElementById('inspect-readout'),
     inspectEmpty: document.getElementById('inspect-empty'),
+    compare: document.getElementById('compare'),
   };
 
-  /* Placeholder copy for the algorithm section. The real text arrives with
-     the algorithms; the section exists now so the shape of the sidebar is
-     settled and nothing has to be rearranged later. */
+  /* Only reached if a room offers no algorithm at all, which no built room
+     does. Kept as a shape for the section rather than as copy anyone should
+     expect to read. */
   const ALGORITHM_PLACEHOLDER = {
-    label: 'SARSA',
-    summary: 'Learns the value of the policy it is actually following, '
-           + 'including the exploratory steps that policy takes.',
-    updateRule: 'Q(s,a) ← Q(s,a) + α[ r + γ Q(s′,a′) − Q(s,a) ]',
-    watchFor: 'Awaiting the algorithm layer. Until it is wired up, the '
-            + 'trajectories on this screen come from the mock producer and '
-            + 'nothing here is learned.',
+    label: 'No method',
+    summary: 'This chamber has no method selected.',
+    updateRule: '—',
+    watchFor: 'Nothing to watch until a method is chosen.',
   };
 
   const OUTCOME_LABELS = {
     success: 'escaped', failure: 'lost', timeout: 'ran out',
   };
+
+  /* What the chamber holds before anything has been learned, and again after
+     Reset. Shared rather than written out at each of the three places that
+     need it, so they cannot drift apart. */
+  const EMPTY_BATCH = { episodes: [], metrics: [] };
 
   const STATE_LABELS = {
     IDLE: 'Idle', RUNNING: 'Running', FINISHED: 'Finished',
@@ -95,6 +98,8 @@
     world: null,          // Renderer instance for the viewport
     inspector: null,      // Renderer instance for the sidebar still
     playback: null,
+    /* Set for real by `setSidebar` during boot, which also applies the body
+       class the layout reads. */
     open: false,
     stale: false,
     staleReason: '',
@@ -108,6 +113,26 @@
        genuinely solved a minute ago. */
     everCleared: false,
     leaving: false,
+    /* True while a request to the far end is outstanding — opening a room
+       or training one. Nothing may be pressed during it. */
+    working: false,
+    /* Whether this run has reached its episode target. Until it has, Play
+       means "train, and let me watch"; afterwards it is a transport control
+       over the recorded episodes. */
+    trained: false,
+    /* Whether training is running right now. */
+    running: false,
+    /* The live loop's animation frame, separate from `ui.playback`'s: one
+       draws training as it happens, the other walks a finished recording. */
+    liveFrame: null,
+    lastLive: 0,
+    /* Throttling for the periodic pull of the recording during training. */
+    lastBatchAt: 0,
+    fetchingBatch: false,
+    recorded: null,
+    /* Steps owed but not yet whole, carried between frames so the speeds
+       mean what they say per second. */
+    owed: 0,
   };
 
   /* ---------------------------------------------------------------------
@@ -286,13 +311,18 @@
       '[data-parameter="' + specification.key + '"]');
     if (control && control.show) control.show(next);
 
-    // A parameter that cannot apply live invalidates what the run has
-    // done so far. The run is not thrown away here — that is the point of
-    // making Reset explicit.
-    if (!specification.appliesLive && ui.playback.inProgress) {
-      ui.stale = true;
-      ui.staleReason = specification.label + ' changed';
-    }
+    // Every change invalidates the run, `appliesLive` or not, and that is
+    // a property of this screen rather than of the parameter: training has
+    // already finished by the time a control can be touched, so there is
+    // nothing left for a live parameter to apply to. The planner screen is
+    // the other way round — it drives training a sweep at a time, so a live
+    // parameter there really does take effect mid-run.
+    //
+    // The run is not thrown away here; that is the point of making Reset
+    // explicit.
+    ui.stale = true;
+    ui.staleReason = specification.label + ' changed';
+    if (ui.compare) ui.compare.setParameters(currentParameters());
     // Some parameters shape the room itself rather than the learning, so
     // what the room says about itself has to keep up even before Reset.
     buildRoomInfo();
@@ -319,10 +349,17 @@
     return wrapper;
   }
 
+  /** The description of the method this run is actually using. */
+  function algorithmDescription() {
+    const running = window.Producer.snapshot;
+    const key = running ? running.algorithm : window.Producer.algorithmDefault;
+    const found = window.Producer.algorithms.filter(
+      entry => entry.key === key);
+    return found.length ? found[0] : null;
+  }
+
   function buildRoomInfo() {
-    // Rebuilt rather than patched, because a parameter can change what
-    // this section says about the room.
-    const info = window.Mock.room(ui.roomId, ui.parameters).info;
+    const info = ui.room.info;
 
     dom.sector.textContent = ui.room.sector || '';
     dom.name.textContent = ui.room.name;
@@ -383,7 +420,7 @@
   function buildAlgorithmInfo() {
     // The room names its own method — they are not all SARSA — and falls
     // back to the placeholder only if it does not.
-    const text = ui.room.algorithm || ALGORITHM_PLACEHOLDER;
+    const text = algorithmDescription() || ALGORITHM_PLACEHOLDER;
     dom.algorithmInfo.innerHTML = '';
     dom.algorithmInfo.appendChild(block(text.label, text.summary));
 
@@ -468,13 +505,28 @@
      The episode browser
      ------------------------------------------------------------------- */
 
-  function buildEpisodeList() {
-    const played = ui.playback.metrics;
+  /**
+   * The episodes there are to look at: everything recorded, in order.
+   *
+   * Deliberately not `ui.playback.metrics`, which counts episodes *played
+   * back*. An episode can be taken apart because it was recorded, not
+   * because it has been watched — and now that training is watched live
+   * rather than replayed, nothing is played back at all unless you ask for
+   * it. Reading the played count was what left the step inspector empty
+   * after a run finished.
+   */
+  function recordedMetrics() {
+    if (ui.recorded) return ui.recorded.metrics;
+    return ui.playback.metrics;
+  }
+
+  function buildEpisodeList(metrics) {
+    const played = metrics || recordedMetrics();
     dom.episodeList.innerHTML = '';
 
     if (!played.length) {
       dom.episodeList.appendChild(
-        element('p', 'hint', 'Episodes appear here as they are played.'));
+        element('p', 'hint', 'Episodes appear here as they are recorded.'));
       paintEpisodeDetail();
       return;
     }
@@ -559,7 +611,7 @@
      ------------------------------------------------------------------- */
 
   function buildInspectorEpisodes() {
-    const played = ui.playback.metrics;
+    const played = recordedMetrics();
     const previous = ui.inspect.episode;
 
     dom.inspectEpisode.innerHTML = '';
@@ -657,6 +709,25 @@
      ------------------------------------------------------------------- */
 
   function paintStrip() {
+    // While training is what is on screen, the strip counts episodes trained
+    // rather than episodes replayed, and there is no batch to count anyway.
+    if (!ui.trained) {
+      const snapshot = window.Producer.snapshot;
+      if (snapshot && snapshot.progress.count) {
+        paintLiveStrip();
+      } else {
+        dom.strip.episodes.textContent = 'press Train to start';
+        dom.strip.state.textContent = 'Ready';
+        dom.strip.metric.textContent = '';
+      }
+      dom.strip.cleared.hidden = true;
+      dom.strip.stale.hidden = !ui.stale;
+      if (ui.stale) {
+        dom.strip.stale.textContent = ui.staleReason + ' — reset to apply';
+      }
+      return;
+    }
+
     const played = ui.playback.episodesPlayed;
     dom.strip.episodes.textContent = played + ' / ' + ui.playback.total
                                    + ' episodes';
@@ -699,15 +770,34 @@
     const replaying = state === P.REPLAYING;
     const finished = state === P.FINISHED;
 
+    // Nothing may be pressed while the far end is training: there is no
+    // batch to act on yet, and a second request would race the first.
+    const busy = ui.working;
+
+    // Until the episode target is reached, the transport controls drive the
+    // training itself rather than a recording of it.
+    if (!ui.trained) {
+      dom.play.textContent = ui.running ? 'Pause' : 'Train';
+      disable(dom.play, busy || ui.stale);
+      disable(dom.step, busy || ui.stale || ui.running);
+      disable(dom.reset, busy);
+      // There is no finished route to show until there is a recording.
+      disable(dom.finalRoute, true);
+      disable(dom.replayPlay, false);
+      disable(dom.replayStep, false);
+      return;
+    }
+
     dom.play.textContent = (state === P.RUNNING || replaying) ? 'Pause' : 'Play';
     // A stale run may not be continued; it may only be reset.
-    disable(dom.play, finished || ui.stale);
-    disable(dom.step, finished || ui.stale);
-    disable(dom.reset, state === P.IDLE && !ui.playback.inProgress && !ui.stale);
+    disable(dom.play, finished || ui.stale || busy);
+    disable(dom.step, finished || ui.stale || busy);
+    disable(dom.reset, busy
+            || (state === P.IDLE && !ui.playback.inProgress && !ui.stale));
 
     // Deliberately still available once FINISHED — that is exactly when
     // the finished route is what you want to look at.
-    disable(dom.finalRoute, ui.playback.episodesPlayed === 0);
+    disable(dom.finalRoute, busy || ui.playback.episodesPlayed === 0);
 
     disable(dom.replayPlay, false);
     disable(dom.replayStep, false);
@@ -732,31 +822,271 @@
      Controls
      ------------------------------------------------------------------- */
 
-  function togglePlay() {
-    const state = ui.playback.state;
-    if (state === P.RUNNING || state === P.REPLAYING) ui.playback.pause();
-    else ui.playback.play();
-    paintAll();
+  /* ---------------------------------------------------------------------
+     Training, watched
+
+     Play runs the agent in the chamber and draws it as it goes: one slice
+     of work per frame, then the world that came back. Nothing is trained
+     out of sight, and nothing has to finish before there is something to
+     look at. Replaying a particular episode afterwards is a separate thing
+     — see `ui.playback`, which owns that and nothing else now.
+     ------------------------------------------------------------------- */
+
+  /** The live world, in the shape the renderer draws frames in. */
+  function liveSnapshot() {
+    const snapshot = window.Producer.snapshot;
+    if (!ui.room || !snapshot || !snapshot.scene) return null;
+
+    const scene = snapshot.scene;
+    // The renderer wants these keyed by entity id; the contract carries them
+    // as lists, because a list is the honest shape for "what changed".
+    const states = {};
+    (scene.entityStates || []).forEach(entry => {
+      states[entry.id] = entry.state;
+    });
+    const moved = {};
+    (scene.entityPositions || []).forEach(entry => {
+      moved[entry.id] = entry.position;
+    });
+
+    return {
+      room: ui.room,
+      position: scene.position,
+      entityStates: states,
+      entityPositions: moved,
+    };
   }
 
-  function reset() {
-    // The room itself is rebuilt: some parameters shape it rather than the
-    // learning, and Reset is where they take effect. When a real producer
-    // is behind this, it is the same two calls.
-    ui.room = window.Mock.room(ui.roomId, ui.parameters);
+  function liveTick(now) {
+    const dt = Math.min(0.05, (now - ui.lastLive) / 1000) || 0;
+    ui.lastLive = now;
+
+    // One speed setting for both loops, kept on the playback controller so
+    // the chips have a single thing to read and write.
+    const speed = C.speeds[ui.playback.speed];
+    let options = null;
+
+    if (speed.animated) {
+      // Steps are owed at a rate per *second*. A frame is not a unit the
+      // simulation cares about, and asking for a whole step on every frame
+      // would make the slowest speed twenty times too fast at 60fps — so the
+      // fraction is carried over rather than rounded away.
+      ui.owed += speed.stepsPerSecond * dt;
+      const steps = Math.floor(ui.owed);
+      if (steps >= 1) {
+        ui.owed -= steps;
+        options = { steps: steps };
+      }
+    } else {
+      // Turbo is not paced at all: as much as fits in the budget, drawn once.
+      options = { budgetMs: C.turboBudgetMs };
+    }
+
+    if (options) {
+      // Not awaited: a frame must not wait on the network. `slice` resolves
+      // null while a request is outstanding, so slow frames simply skip.
+      window.Producer.slice(options).then(snapshot => {
+        if (!snapshot) return;
+        if (snapshot.state !== 'TRAINING') finishedTraining();
+      }).catch(failed);
+    }
+
+    ui.world.draw(liveSnapshot());
+    paintLiveStrip();
+    refreshRecordings(now);
+
+    ui.liveFrame = window.requestAnimationFrame(liveTick);
+  }
+
+  /**
+   * Pull the recorded episodes in every so often while training runs.
+   *
+   * The graphs and the episode list are meant to fill in *as* the agent
+   * learns, not once it has finished — but the recording is a whole batch in
+   * one response, so fetching it every frame would be absurd. Every couple of
+   * seconds is often enough to watch a curve move and cheap enough to ignore.
+   */
+  function refreshRecordings(now) {
+    if (ui.fetchingBatch) return;
+    if (now - ui.lastBatchAt < C.liveBatchRefreshMs) return;
+    ui.lastBatchAt = now;
+    ui.fetchingBatch = true;
+
+    window.Producer.episodes().then(batch => {
+      ui.fetchingBatch = false;
+      if (ui.trained) return;
+      ui.recorded = batch;
+      // Handed to the playback controller so the step inspector can reach
+      // individual frames, but its loop stays stopped: the world on screen is
+      // the live one, and two loops drawing into one canvas is one too many.
+      ui.playback.load(ui.room, batch);
+      buildEpisodeList();
+      buildInspectorEpisodes();
+      paintInspector();
+      if (ui.repaintCharts) ui.repaintCharts(batch.metrics);
+    }).catch(() => { ui.fetchingBatch = false; });
+  }
+
+  function startLive() {
+    if (ui.liveFrame !== null) return;
+    ui.lastLive = window.performance ? window.performance.now() : 0;
+    ui.owed = 0;
+    ui.liveFrame = window.requestAnimationFrame(liveTick);
+  }
+
+  function stopLive() {
+    if (ui.liveFrame === null) return;
+    window.cancelAnimationFrame(ui.liveFrame);
+    ui.liveFrame = null;
+  }
+
+  /** Training has reached its episode target. Fetch what was recorded. */
+  function finishedTraining() {
+    if (ui.trained) return;
+    ui.trained = true;
+    ui.running = false;
+    stopLive();
+    window.Producer.episodes().then(batch => {
+      ui.recorded = batch;
+      ui.playback.load(ui.room, batch);
+      buildEpisodeList();
+      buildInspectorEpisodes();
+      // The recording's own metrics, not the played count — nothing has been
+      // played back yet, and the graphs are about what happened in training.
+      if (ui.repaintCharts) ui.repaintCharts(batch.metrics);
+      // Now the world belongs to the playback controller, so its loop starts.
+      ui.playback.start();
+      paintAll();
+    }).catch(failed);
+  }
+
+  async function togglePlay() {
+    if (ui.trained) {
+      // Training is over; Play is now a transport control over the replay.
+      const state = ui.playback.state;
+      if (state === P.RUNNING || state === P.REPLAYING) ui.playback.pause();
+      else ui.playback.play();
+      paintAll();
+      return;
+    }
+
+    if (ui.running) {
+      ui.running = false;
+      stopLive();
+      await window.Producer.hold();
+      paintAll();
+      return;
+    }
+
+    ui.running = true;
+    paintControls();
+    try {
+      await window.Producer.begin();
+    } catch (problem) {
+      failed(problem);
+      return;
+    }
+    startLive();
+  }
+
+  /** One step of training, then stopped. */
+  async function stepOnce() {
+    if (ui.trained) { ui.playback.step(); paintAll(); return; }
+    try {
+      await window.Producer.begin();
+      const snapshot = await window.Producer.slice({ steps: 1 });
+      if (snapshot && snapshot.state !== 'TRAINING') finishedTraining();
+      await window.Producer.hold();
+    } catch (problem) {
+      failed(problem);
+      return;
+    }
+    ui.world.draw(liveSnapshot());
+    paintLiveStrip();
+    paintControls();
+  }
+
+  /** The strip while training is being watched. */
+  function paintLiveStrip() {
+    const snapshot = window.Producer.snapshot;
+    if (!snapshot) return;
+    const target = snapshot.parameters.episodes;
+    dom.strip.episodes.textContent = target
+      ? snapshot.progress.count + ' / ' + Math.round(target) + ' episodes'
+      : snapshot.progress.count + ' sweeps';
+    dom.strip.state.textContent = ui.running ? 'Training' : 'Paused';
+
+    const metric = snapshot.metric;
+    if (metric && metric.value !== null && metric.value !== undefined) {
+      dom.strip.metric.textContent = metric.label + ' '
+                                   + Number(metric.value).toFixed(1);
+    }
+  }
+
+  /* ---------------------------------------------------------------------
+     Talking to the far end
+
+     Training happens on the Python side and takes real time, so the two
+     things that trigger it — opening the chamber and resetting it — are
+     the only asynchronous functions on this screen. Everything else
+     operates on a batch that has already arrived.
+     ------------------------------------------------------------------- */
+
+  /**
+   * A request failed, and the screen has to say so rather than sit on
+   * "Training" forever. The most likely cause by far is that `serve.py`
+   * is not running, which the message should make obvious.
+   */
+  function failed(problem) {
+    dom.strip.state.textContent = 'Failed';
+    dom.strip.episodes.textContent = String(
+      (problem && problem.message) || problem);
+    ui.working = false;
+    paintControls();
+  }
+
+  async function reset() {
+    if (ui.working) return;
+    ui.working = true;
+    // Both loops stopped first: one is animating a batch about to be
+    // replaced, the other is asking for training about to be thrown away.
+    ui.playback.stop();
+    stopLive();
+    ui.running = false;
+    paintControls();
+
+    let room;
+    try {
+      // The room itself is rebuilt, because some parameters shape it rather
+      // than the learning, and Reset is where those take effect.
+      room = await window.Producer.restart(currentParameters());
+    } catch (problem) {
+      failed(problem);
+      return;
+    }
+    ui.working = false;
+    // Back to how the chamber opened: nothing learned, waiting on Play.
+    ui.trained = false;
+
+    ui.room = room;
     ui.playback.reset();
-    ui.playback.load(ui.room, window.Mock.batch(ui.room, currentParameters()));
+    ui.playback.load(ui.room, EMPTY_BATCH);
 
     ui.stale = false;
     ui.staleReason = '';
     ui.inspect = { episode: null, step: 0 };
+    ui.recorded = null;
+    ui.lastBatchAt = 0;
 
     buildLegend();
     buildRoomInfo();
+    buildAlgorithmInfo();
     buildEpisodeList();
     buildInspectorEpisodes();
+    if (ui.repaintCharts) ui.repaintCharts([]);
     refit();
     paintAll();
+    ui.world.draw({ room: ui.room, position: null });
   }
 
   function setSidebar(open) {
@@ -776,18 +1106,23 @@
   function leave() {
     if (ui.leaving) return;
 
-    if (ui.playback && ui.playback.inProgress
+    const unfinished = (ui.playback && ui.playback.inProgress) || ui.running;
+    if (unfinished
         && !window.confirm('This run has not finished. Leaving discards it.')) {
       return;
     }
 
     ui.leaving = true;
-    // Stopped before navigating, so nothing is still drawing into a canvas
-    // that is about to go away.
+    // Both loops stopped before navigating, so nothing is still drawing into
+    // a canvas that is about to go away.
     ui.playback.stop();
-    ui.playback.load(ui.room, { episodes: [], metrics: [] });
+    stopLive();
+    // A room that never opened — the far end was not running — has nothing
+    // to unload, and the exit must still work in that case.
+    if (ui.room) ui.playback.load(ui.room, { episodes: [], metrics: [] });
 
-    const number = ui.room.id.replace('room', '');
+    // Read from the query rather than the room, which may never have loaded.
+    const number = ui.roomId.replace('room', '');
     try {
       // Come back to the chamber just left, rather than to whichever one
       // is furthest along.
@@ -811,7 +1146,7 @@
      ------------------------------------------------------------------- */
 
   dom.play.addEventListener('click', togglePlay);
-  dom.step.addEventListener('click', () => { ui.playback.step(); paintAll(); });
+  dom.step.addEventListener('click', stepOnce);
   dom.reset.addEventListener('click', reset);
   dom.finalRoute.addEventListener('click', showFinalRoute);
   dom.toggle.addEventListener('click', () => setSidebar(!ui.open));
@@ -878,6 +1213,13 @@
       // The loop is stopped and playback is paused, so nothing advances
       // unseen and the position is exactly where it was on return.
       ui.playback.stop();
+      // Training is paused rather than merely left undrawn: it runs on the
+      // far end, and a hidden page must not keep asking for work.
+      stopLive();
+      if (ui.running) {
+        ui.running = false;
+        window.Producer.hold().catch(() => {});
+      }
       if (ui.playback.state === P.RUNNING || ui.playback.state === P.REPLAYING) {
         ui.playback.pause();
         paintAll();
@@ -891,16 +1233,13 @@
      Boot
      ------------------------------------------------------------------- */
 
-  function boot() {
+  async function boot() {
     ui.roomId = roomFromQuery();
-    ui.room = window.Mock.room(ui.roomId);
+    ui.working = true;
 
-    ui.room.parameterSchema.forEach(specification => {
-      ui.parameters[specification.key] = specification.default;
-    });
-    // Built once more now the parameters are known, since some of them
-    // shape what the room says about itself.
-    ui.room = window.Mock.room(ui.roomId, ui.parameters);
+    // The chamber number is what the API takes; the id is this screen's way
+    // of naming the same thing.
+    const number = Number(ui.roomId.replace('room', ''));
 
     window.Renderer.readPalette();
     ui.world = window.Renderer.create(dom.canvas);
@@ -932,21 +1271,60 @@
       state: function () { paintControls(); paintStrip(); },
     });
 
-    ui.playback.load(ui.room, window.Mock.batch(ui.room, currentParameters()));
+    buildSpeeds();
+    ui.repaintCharts = window.Charts.build(dom.charts);
+    // Its own run on the far end, so comparing never disturbs this one.
+    ui.compare = window.Compare.mount(dom.compare, number);
+    dom.strip.state.textContent = 'Opening';
+    paintControls();
+
+    let room;
+    try {
+      room = await window.Producer.open(number);
+    } catch (problem) {
+      failed(problem);
+      return;
+    }
+    ui.working = false;
+
+    ui.room = room;
+    ui.room.parameterSchema.forEach(specification => {
+      ui.parameters[specification.key] = specification.default;
+    });
+
+    // An empty batch, on purpose: nothing has been learned yet. The renderer
+    // draws a room with no episode in it perfectly well — the chamber, its
+    // legend and what it says about itself are all up immediately, and there
+    // is simply no agent walking about until Play is pressed.
+    ui.playback.load(ui.room, EMPTY_BATCH);
 
     buildLegend();
-    buildSpeeds();
     buildParameters();
     buildRoomInfo();
     buildAlgorithmInfo();
-    ui.repaintCharts = window.Charts.build(dom.charts);
     buildEpisodeList();
     buildInspectorEpisodes();
 
-    refit();
+    // Open, not closed. Everything that makes the chamber legible — what it
+    // is, its parameters, its graphs — lives in there, and a screen that
+    // opens with all of it hidden behind one handle reads as an empty grid.
+    // `setSidebar` re-fits the world into what is left, so this replaces the
+    // bare `refit()` rather than sitting beside it.
+    setSidebar(true);
     paintAll();
-    ui.playback.start();
+    // Drawn once, rather than by starting the playback loop. That loop draws
+    // whatever the batch says, and there is no batch yet — and once training
+    // begins the live loop owns this canvas. Two loops painting into one
+    // canvas is one too many, which is what made the agent flicker.
+    ui.world.draw({ room: ui.room, position: null });
   }
+
+  /* The session is the far end's to keep only as long as this page holds
+     it, so it is handed back on the way out however the page goes away. */
+  window.addEventListener('pagehide', () => {
+    window.Producer.release();
+    if (ui.compare) ui.compare.release();
+  });
 
   boot();
 })();

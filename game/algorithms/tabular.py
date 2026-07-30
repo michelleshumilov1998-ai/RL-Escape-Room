@@ -18,7 +18,7 @@ the grid, but nothing below ever calls it — the only way these methods find
 out what an action does is to take it.
 """
 
-from game.algorithms.base import Algorithm
+from game.algorithms.base import Algorithm, project_to_cells
 
 
 class TabularLearner(Algorithm):
@@ -148,12 +148,12 @@ class TabularLearner(Algorithm):
     def snapshot(self):
         values = self.state_values()
         policy = self.greedy_policy()
+        # Several states share one square, so the table is projected onto the
+        # grid exactly the way a planner's is — see `project_to_cells`.
+        projected, arrows = project_to_cells(values, policy)
         return {
-            "values": {"%d,%d" % state: value
-                       for state, value in values.items()},
-            "policy": {"%d,%d" % state: action
-                       for state, action in policy.items()
-                       if action is not None},
+            "values": projected,
+            "policy": arrows,
             "episodes": self.episodes,
             "episodeTarget": self.episode_target,
             "epsilon": self.epsilon,

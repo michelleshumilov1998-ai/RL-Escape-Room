@@ -680,6 +680,7 @@ function leave() {
   }
 
   Sim.release();
+  if (ui.compare) ui.compare.release();
   window.location.href = '../levels/';
 }
 
@@ -767,7 +768,15 @@ async function boot() {
     buildParameters();
     buildInfo();
     ui.repaintCharts = Charts.build(dom.charts, PLANNER_SERIES);
-    refit();
+    // Value Iteration and Policy Iteration reach the same plan by very
+    // different amounts of work, which is only visible side by side. Its own
+    // run on the far end, so it never disturbs this one.
+    ui.compare = window.Compare.mount(
+      document.getElementById('compare'), ui.room);
+    // Open by default, for the same reason as the other screen: the sidebar
+    // is where the room explains itself. `setSidebar` re-fits the grid into
+    // the space left over, so it stands in for the bare `refit()`.
+    setSidebar(true);
     paint();
     startLoop();
   } catch (problem) {

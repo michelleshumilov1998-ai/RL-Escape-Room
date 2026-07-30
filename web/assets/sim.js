@@ -83,6 +83,19 @@ window.Sim = (function () {
     step() { return command('step'); },
     reset() { return command('reset'); },
     replay() { return command('replay'); },
+
+    /**
+     * The episodes recorded during training, whole.
+     *
+     * The only request that does not answer with a snapshot, so it must not
+     * go through `command` — that would overwrite the last snapshot with a
+     * batch and every reader of `Sim.snapshot` would then be looking at the
+     * wrong kind of object.
+     */
+    episodes() {
+      if (!sessionId) return Promise.reject(new Error('no session'));
+      return request('POST', '/api/session/' + sessionId + '/episodes', {});
+    },
     setParameters(values) { return command('parameters', { values: values }); },
     resetParameter(name) { return command('parameter-default', { name: name }); },
     setAlgorithm(key) { return command('algorithm', { key: key }); },

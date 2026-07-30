@@ -7,6 +7,8 @@
 <title>PROJECT R-5 — Chamber</title>
 <link rel="stylesheet" href="../assets/base.css">
 <link rel="stylesheet" href="../assets/level.css">
+<!-- Only for the comparison panel's colour key, which both screens share. -->
+<link rel="stylesheet" href="../assets/room/room.css">
 </head>
 <body>
 
@@ -89,6 +91,13 @@
       <dl class="readout" id="readout"></dl>
     </div>
   </details>
+
+  <!-- Value Iteration and Policy Iteration reach the same plan by very
+       different amounts of work, which is only visible side by side. -->
+  <details class="section">
+    <summary>Compare methods</summary>
+    <div class="section-body" id="compare"></div>
+  </details>
 </aside>
 
 <!-- The charts are shared with the room screen, and read their sizes and
@@ -99,6 +108,7 @@
 <script src="../assets/shapes.js"></script>
 <script src="../assets/sim.js"></script>
 <script src="../assets/renderer.js"></script>
+<script src="../assets/room/compare.js"></script>
 <script src="../assets/level.js"></script>
 </body>
 </html>

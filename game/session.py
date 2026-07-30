@@ -20,9 +20,16 @@ how much work that turns into.
 import random
 import time
 
-from game import algorithms, config, rooms
+from game import algorithms, config, definition, rooms
 from game.algorithms.base import Transition
 from game.grid import ACTION_ARROWS, ACTION_NAMES, GridWorld
+from game.reactor import ReactorWorld
+from game.recorder import Recorder
+
+# Which environment a room is built on. Most rooms are the plain grid; a room
+# with things that move on their own says so by naming its own class here,
+# which is a change to this table and to nothing else.
+WORLDS = {"reactor": ReactorWorld}
 
 IDLE = "IDLE"
 TRAINING = "TRAINING"
@@ -84,10 +91,22 @@ class Session:
         values.update(self.room.get("parameter_defaults") or {})
         return values
 
+    # Which parameters drive an entry of the room's reward table. A room that
+    # does not expose one keeps whatever its own table says.
+    REWARD_PARAMETERS = {"battery_reward": "battery"}
+
+    def _reward_overrides(self):
+        return {reward: self.parameters[name]
+                for name, reward in self.REWARD_PARAMETERS.items()
+                if name in self.parameters}
+
     def _build(self):
         """A fresh environment and a fresh algorithm from the parameters."""
         slip = self.parameters.get("slip", 0.0)
-        self.env = GridWorld(self.room, slip=slip, seed=self.seed)
+        world = WORLDS.get(self.room.get("world"), GridWorld)
+        self.env = world(self.room, slip=slip, seed=self.seed,
+                         rewards=self._reward_overrides(),
+                         collapse=self.parameters.get("collapse_chance", 0.0))
         # The algorithm's own generator, separate from the environment's, so
         # exploration and slipping cannot consume each other's randomness.
         self.algorithm = algorithms.build(self.algorithm_key, self.env,
@@ -95,6 +114,13 @@ class Session:
                                           random.Random(self.seed + 1))
         self.env.reset(seed=self.seed)
         self.episode = None
+        # Only the learners have episodes to record; a planner never takes a
+        # step in the environment at all.
+        self.recorder = Recorder(
+            self.env,
+            config.SESSION["episodes_recorded"],
+            int(self.parameters.get("episodes", 0)),
+            ACTION_NAMES) if self.learns else None
 
     @property
     def learns(self):
@@ -178,6 +204,10 @@ class Session:
             self.parameters[name] = value
             if specification["scope"] == "live":
                 self.algorithm.set_parameter(name, value)
+                # Moving the finish line moves which episodes are worth
+                # keeping; the ones already recorded stay, since they happened.
+                if name == "episodes" and self.recorder is not None:
+                    self.recorder.retarget(int(value))
                 applied.append(name)
                 continue
             deferred.append(specification["label"])
@@ -222,6 +252,7 @@ class Session:
         self.history["delta"].append(report.get("delta", 0.0))
         self.history["startValue"].append(
             self.algorithm.values[self.env.start_state()])
+        self.history["work"].append(self.algorithm.sweeps)
         return report
 
     def _learn_one_step(self):
@@ -232,6 +263,8 @@ class Session:
             state = self.env.reset()
             self.episode = {"state": state, "action": self.algorithm.act(state),
                             "reward": 0.0, "steps": 0}
+            self.recorder.begin(self.algorithm.episodes, state,
+                                self.algorithm.epsilon)
 
         state = self.episode["state"]
         action = self.episode["action"]
@@ -241,8 +274,13 @@ class Session:
         # methods need it and off-policy ones must be handed it anyway so
         # that the two differ in the update rule alone.
         next_action = None if done else self.algorithm.act(next_state)
-        self.algorithm.update(Transition(state, action, reward, next_state,
-                                         next_action, done))
+        report = self.algorithm.update(
+            Transition(state, action, reward, next_state, next_action, done))
+
+        # Passive: the recorder is handed the transition that was taken
+        # anyway and draws no randomness, so recording cannot change what is
+        # learned.
+        self.recorder.step(next_state, action, reward, report, info)
 
         self.episode["reward"] += reward
         self.episode["steps"] += 1
@@ -258,6 +296,16 @@ class Session:
         self.history["length"].append(self.episode["steps"])
         self.history["success"].append(1.0 if info["goal"] else 0.0)
         self.history["fell"].append(1.0 if info["hazard"] else 0.0)
+        self.history["work"].append(self.algorithm.episodes)
+        # A run that neither got out nor fell in was stopped by the step
+        # limit, which is a third outcome and worth naming as one.
+        if info["goal"]:
+            outcome = "success"
+        elif done:
+            outcome = "failure"
+        else:
+            outcome = "timeout"
+        self.recorder.end(outcome, self.episode["reward"])
         self.episode = None
         return {"done": True, "goal": info["goal"], "hazard": info["hazard"]}
 
@@ -386,16 +434,22 @@ class Session:
         the reward per episode, which does not. Saying which here keeps the
         renderer from carrying a rule per room.
         """
+        # `x` and `points` are downsampled by the same stride, so a pair
+        # always belongs together.
         if self.learns:
             return {
                 "label": "Reward per episode",
+                "xLabel": "Episodes",
                 "scale": "linear",
+                "x": _downsample(self.history["work"]),
                 "points": _downsample(self.history["reward"]),
                 "threshold": None,
             }
         return {
-            "label": "Largest value change per sweep",
+            "label": "Largest value change",
+            "xLabel": "Sweeps",
             "scale": "log",
+            "x": _downsample(self.history["work"]),
             "points": _downsample(self.history["delta"]),
             "threshold": self.parameters.get("theta"),
         }
@@ -427,6 +481,16 @@ class Session:
             ["Converged", "yes" if learned["converged"] else "no"],
         ])
         return rows
+
+    def _scene(self):
+        """Where the agent is now, and whatever else the room has moving."""
+        state = self.env.state
+        entity_states, positions = self.env.frame_extras(state)
+        return {
+            "position": self.env.world_position(state),
+            "entityStates": entity_states,
+            "entityPositions": positions,
+        }
 
     def snapshot(self):
         """Everything the page needs, and nothing it should not have."""
@@ -460,6 +524,11 @@ class Session:
                 "format": metric["format"],
             },
             "grid": self.env.snapshot(),
+            # The world as it stands, in the shape the room screen draws
+            # frames in. This is what lets that screen show training as it
+            # happens rather than only replaying it afterwards: the same
+            # fields a recorded frame carries, for the current moment.
+            "scene": self._scene(),
             "learned": algorithm,
             "curve": self.curve(),
             "readout": self.readout(),
@@ -467,9 +536,24 @@ class Session:
             "solved": self.solved(),
         }
 
+    def batch(self):
+        """The episodes kept step by step, for the screen that replays them.
+
+        A planner has none — it never takes a step in the environment — and
+        an empty batch is legal, so this needs no special case.
+        """
+        if self.recorder is None:
+            return {"episodes": [], "metrics": []}
+        return self.recorder.batch()
+
     def describe(self):
         """The static half: layout, entities, words. Sent once."""
         return {
+            # The room screen's contract, built from the same room data the
+            # rest of this payload comes from. The two screens want different
+            # shapes of the same facts; neither is derived from the other.
+            "definition": definition.build(self.room, self.env,
+                                           self.parameters),
             "room": {
                 "number": self.room["number"],
                 "name": self.room["name"],
@@ -491,8 +575,16 @@ class Session:
 
 
 def _empty_history():
-    """Both families' series. Each only ever fills its own."""
-    return {"delta": [], "startValue": [],
+    """Both families' series. Each only ever fills its own.
+
+    `work` is how much the method had actually done by the time each point
+    was taken, and it exists because that is not the same as how many points
+    there are. One call of Value Iteration is one sweep; one call of Policy
+    Iteration is a whole policy evaluation — dozens of sweeps — followed by an
+    improvement. Plotting the two against point index would put 15 sweeps and
+    389 sweeps on the same tick and quietly claim they were comparable.
+    """
+    return {"delta": [], "startValue": [], "work": [],
             "reward": [], "length": [], "success": [], "fell": []}
 
 

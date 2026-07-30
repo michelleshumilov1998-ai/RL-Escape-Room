@@ -79,60 +79,133 @@ RENDER = {
 #           decides that a hazard in this chamber *is* one.  The recipes
 #           are shared with the room screen, so a wall looks the same in
 #           every room.
+#   role    what kind of thing it is, out of "static", "hazard", "goal" and
+#           "agent".  The renderer draws in role order and skips the agent's
+#           own entity, so it never has to recognise particular type names to
+#           work out what goes underneath what.
 ENTITIES = {
     "floor": {
         "label": "Floor", "colour": "--cell-floor", "shape": "floor",
-        "in_legend": False,
+        "in_legend": False, "role": "static",
     },
     "wall": {
         "label": "Wall", "colour": "--cell-wall", "shape": "wall",
-        "in_legend": True,
+        "in_legend": True, "role": "static",
     },
     "slippery": {
         "label": "Ice", "colour": "--cell-slippery", "shape": "ice",
-        "in_legend": True,
+        "in_legend": True, "role": "static",
     },
     # This chamber's hazard is a laser grid, and the beams are what the
     # room is named after, so they are drawn as beams with emitters rather
     # than as red cells.
     "hazard": {
         "label": "Laser", "colour": "--hazard", "shape": "laser",
-        "in_legend": True,
+        "in_legend": True, "role": "hazard",
+    },
+    # Room 2's hazard, and a different kind of thing from room 1's beam: it
+    # ends the run rather than sending the agent back to the door, so it is
+    # drawn as a hole in the floor rather than as something switched on.
+    "pit": {
+        "label": "Shaft", "colour": "--hazard", "shape": "abyss",
+        "in_legend": True, "role": "hazard",
+    },
+    # A sound span over the shaft. Behaves exactly like floor; it is a tile of
+    # its own only so it can be drawn as a bridge rather than as ground.
+    "bridge": {
+        "label": "Bridge", "colour": "--cell-start", "shape": "bridge",
+        "in_legend": True, "role": "static",
+    },
+    # A plank that gives way once it has been crossed. `states` is how the
+    # room says what "collapsed" looks like — the renderer treats the word as
+    # opaque and only uses it to pick an appearance, so the drawing code never
+    # has to know what collapsing means.
+    "collapsing": {
+        "label": "Collapsing plank", "colour": "--cell-slippery",
+        "shape": "bridge", "in_legend": True, "role": "static",
+        "states": {
+            "collapsed": {"shape": "bridgeBroken", "colour": "--hazard"},
+            # Named explicitly so an episode can declare every plank intact on
+            # its first frame. A replay is watched on its own and must not
+            # inherit the wreckage of the episode before it.
+            "sound": {"shape": "bridge", "colour": "--cell-slippery"},
+        },
+    },
+    # Room 3's furniture.
+    # A generator is white while it is off and green once it is running, so
+    # progress through the sequence is readable off the chamber itself rather
+    # than only from the sidebar.
+    "generator": {
+        "label": "Generator", "colour": "--generator-off",
+        "shape": "generator", "in_legend": True, "role": "static",
+        "states": {
+            "off": {"shape": "generator", "colour": "--generator-off"},
+            "on": {"shape": "generator", "colour": "--goal"},
+        },
+    },
+    # A door on a cycle. Which of the two it is showing comes from the step,
+    # so the room says what each looks like and the renderer stays ignorant.
+    "sliding": {
+        "label": "Sliding door", "colour": "--cell-start", "shape": "door",
+        "in_legend": True, "role": "static",
+        "states": {
+            "open": {"shape": "door", "colour": "--cell-start"},
+            "shut": {"shape": "wall", "colour": "--cell-wall"},
+        },
+    },
+    "key": {
+        "label": "Generator key", "colour": "--accent", "shape": "key",
+        "in_legend": True, "role": "static",
+        # A key in hand is no longer lying on the floor.
+        "states": {
+            "there": {"shape": "key", "colour": "--accent"},
+            "taken": {"shape": "floor", "colour": "--cell-floor"},
+        },
+    },
+    "blast": {
+        "label": "Reactor door", "colour": "--goal", "shape": "door",
+        "in_legend": True, "role": "static",
+    },
+    # Not a tile: it walks a patrol, so it is one entity that is given a new
+    # position every step rather than a square of the map.
+    "guard": {
+        "label": "Security robot", "colour": "--hazard", "shape": "guard",
+        "in_legend": True, "role": "hazard",
     },
     "start": {
         "label": "Start", "colour": "--cell-start", "shape": "start",
-        "in_legend": True,
+        "in_legend": True, "role": "static",
     },
     "goal": {
         "label": "Control panel", "colour": "--goal", "shape": "exit",
-        "in_legend": True,
+        "in_legend": True, "role": "goal",
     },
     "agent": {
         "label": "R-5", "colour": "--accent", "shape": "agent",
-        "in_legend": True,
+        "in_legend": True, "role": "agent",
     },
 
     # The rest of room 1's floor. Each is a different way of not doing what
     # it was told, which is the part of the model worth being able to see.
     "cracked": {
         "label": "Cracked ice", "colour": "--cell-slippery", "shape": "ice",
-        "in_legend": True,
+        "in_legend": True, "role": "static",
     },
     "oil": {
         "label": "Oil", "colour": "--cell-wall", "shape": "oil",
-        "in_legend": True,
+        "in_legend": True, "role": "static",
     },
     "battery": {
         "label": "Battery", "colour": "--goal", "shape": "battery",
-        "in_legend": True,
+        "in_legend": True, "role": "static",
     },
     "teleport": {
         "label": "Pad", "colour": "--accent", "shape": "teleport",
-        "in_legend": True,
+        "in_legend": True, "role": "static",
     },
     "oneway": {
         "label": "One-way door", "colour": "--cell-start", "shape": "oneway",
-        "in_legend": True,
+        "in_legend": True, "role": "static",
     },
 }
 
@@ -172,6 +245,28 @@ PARAMETERS = {
         "scope": "reset",
         "explanation": "Chance of sliding sideways instead of going where "
                        "it aimed, when standing on ice.",
+    },
+    # A reward rather than a rate, and the only parameter that edits the model
+    # itself: it changes what the reward table says, which is the thing a
+    # planner reads instead of experience. Reset-scope for that reason — every
+    # value already computed was computed against the old table.
+    "battery_reward": {
+        "label": "Battery bonus",
+        "symbol": "",
+        "minimum": 0.0, "maximum": 80.0, "step": 2.0, "default": 10.0,
+        "scope": "reset",
+        "explanation": "What collecting the battery is worth. Raise it far "
+                       "enough and the detour to fetch it starts paying for "
+                       "itself; the plan then goes out of its way.",
+    },
+    "collapse_chance": {
+        "label": "Plank failure chance",
+        "symbol": "",
+        "minimum": 0.0, "maximum": 0.5, "step": 0.01, "default": 0.10,
+        "scope": "reset",
+        "explanation": "Chance that a plank gives way under the step that "
+                       "lands on it, which ends the run. Four planks at 0.10 "
+                       "means about two crossings in three get across.",
     },
     "alpha": {
         "label": "Learning rate",
@@ -236,6 +331,16 @@ SESSION = {
     # into this many buckets rather than sending every episode to the page.
     "curve_points": 220,
     "seed_default": 0,
+
+    # How many whole episodes are kept step by step, so a finished run can be
+    # replayed rather than only summarised. Every episode contributes to the
+    # graphs; this is the far smaller number that can be watched back.
+    #
+    # It is a budget rather than a preference. An episode early in a run is
+    # ε-random and routinely hits the step limit, so the cost of one is closer
+    # to `max_steps_per_episode` than to the length of a good route — and the
+    # whole batch is sent to the page in one response.
+    "episodes_recorded": 40,
 }
 
 

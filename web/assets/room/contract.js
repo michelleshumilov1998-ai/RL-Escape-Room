@@ -4,10 +4,11 @@
    THE DATA CONTRACT.
 
    This file is the whole agreement between the interface and whatever
-   produces its data.  Nothing below knows where the data comes from: at
-   the moment it comes from `mock.js`, later it will come from the Python
-   side over HTTP, and neither the renderer, the playback controller, the
-   charts nor the shell has to change when it does.
+   produces its data.  Nothing below knows where the data comes from: it
+   arrives from the Python side over HTTP, assembled by `producer.js`, and
+   before that it came from a mock producer in the browser.  Neither the
+   renderer, the playback controller, the charts nor the shell changed when
+   it was swapped, which is the property this file exists to protect.
 
    Read this before reading anything else in this directory.
 

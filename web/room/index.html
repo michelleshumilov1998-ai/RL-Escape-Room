@@ -95,6 +95,13 @@
     <div class="section-body" id="charts"></div>
   </details>
 
+  <!-- Every method this chamber offers, on one set of axes. Its own run on
+       the far end, so it never disturbs the one being watched. -->
+  <details class="section">
+    <summary>Compare methods</summary>
+    <div class="section-body" id="compare"></div>
+  </details>
+
   <details class="section">
     <summary>Episode replay</summary>
     <div class="section-body">
@@ -146,7 +153,12 @@
 <script src="../assets/room/renderer.js"></script>
 <script src="../assets/room/charts.js"></script>
 <script src="../assets/room/playback.js"></script>
-<script src="../assets/room/mock.js"></script>
+<!-- The simulation, and the producer that turns it into this screen's
+     contract. `sim.js` is shared with room 1's screen: one session
+     lifetime and one set of request plumbing for both. -->
+<script src="../assets/sim.js"></script>
+<script src="../assets/room/producer.js"></script>
+<script src="../assets/room/compare.js"></script>
 <script src="../assets/room/shell.js"></script>
 </body>
 </html>

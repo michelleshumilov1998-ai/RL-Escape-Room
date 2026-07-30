@@ -154,3 +154,33 @@
 @media (prefers-reduced-motion: reduce) {
   .episode { transition: none; }
 }
+
+/* ---------------------------------------------------------------------
+   Comparing methods
+
+   The legend here is a colour key for curves rather than for things on
+   the grid, so it does not reuse the grid legend's canvas swatches.
+   ------------------------------------------------------------------- */
+
+.compare-legend {
+  position: static;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem 0.9rem;
+  margin: 0.5rem 0 0.2rem;
+  padding: 0;
+  list-style: none;
+}
+
+.compare-legend li {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.compare-swatch {
+  width: 0.85rem;
+  height: 2px;
+  border-radius: 1px;
+  flex: none;
+}

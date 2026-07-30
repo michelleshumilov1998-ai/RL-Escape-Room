@@ -25,6 +25,12 @@ window.ROOM_CONFIG = {
   },
   speedDefault: 'normal',
 
+  /* How often the recorded episodes are pulled in while training is being
+     watched, so the graphs and the episode list fill in as it learns rather
+     than only once it has finished. The recording arrives whole, so this is
+     a compromise between a live curve and a pointless amount of traffic. */
+  liveBatchRefreshMs: 2000,
+
   /* Turbo's work is time-budgeted rather than counted, so a fast machine
      does not run away with the episode counter between two frames. Kept
      well under a frame so the interface never stops answering. */

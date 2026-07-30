@@ -132,6 +132,36 @@ def best_action(env, state, values, gamma):
     return chosen, chosen_value
 
 
+def project_to_cells(values, policy):
+    """Collapse a state table onto the one grid the page actually draws.
+
+    A room's state carries more than a cell — a battery in hand, the
+    direction it was last pushed — so several states share one square. Each
+    square therefore shows its best state, and the arrow shown is that same
+    state's, so the colour and the arrow can never disagree about which
+    state they are describing.
+
+    Both families project through here on purpose. A planner's values and a
+    learner's are meant to be read against each other, and they could not be
+    if one collapsed the extra dimensions differently from the other.
+
+    Returns (values by "row,col", actions by "row,col").
+    """
+    best = {}
+    for state, value in values.items():
+        key = "%d,%d" % (state[0], state[1])
+        if key not in best or value > best[key][0]:
+            best[key] = (value, state)
+
+    arrows = {}
+    for key, (_, state) in best.items():
+        action = policy.get(state)
+        if action is not None:
+            arrows[key] = action
+
+    return {key: value for key, (value, _) in best.items()}, arrows
+
+
 class Planner(Algorithm):
     """Common ground for the methods that are handed the model.
 
@@ -173,27 +203,10 @@ class Planner(Algorithm):
 
     def snapshot(self):
         policy = self.greedy_policy()
-
-        # A room's state may carry more than a cell — a battery in hand, the
-        # direction it was last pushed — so several states share one square
-        # of the grid. The page draws one grid, so each square shows its
-        # best state, and the arrow shown is that same state's, so the
-        # colour and the arrow can never disagree about which state they
-        # are describing.
-        best = {}
-        for state, value in self.values.items():
-            key = "%d,%d" % (state[0], state[1])
-            if key not in best or value > best[key][0]:
-                best[key] = (value, state)
-
-        arrows = {}
-        for key, (_, state) in best.items():
-            action = policy.get(state)
-            if action is not None:
-                arrows[key] = action
+        values, arrows = project_to_cells(self.values, policy)
 
         return {
-            "values": {key: value for key, (value, _) in best.items()},
+            "values": values,
             "policy": arrows,
             "sweeps": self.sweeps,
             # Before the first sweep there is no measured change. None rather

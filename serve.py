@@ -29,6 +29,7 @@ import uuid
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 from game import config, rooms
+from game.comparison import Comparison
 from game.session import IllegalTransition, Session
 
 HOST = "127.0.0.1"
@@ -142,6 +143,10 @@ def api_command(identifier, command, body):
             return session.reset()
         if command == "replay":
             return session.start_replay()
+        if command == "episodes":
+            # Not a snapshot: the whole recording, which the room screen is
+            # handed once a run has finished and then animates on its own.
+            return session.batch()
         if command == "advance":
             budget = body.get("budgetMs")
             if budget is not None:
@@ -160,6 +165,34 @@ def api_command(identifier, command, body):
         raise BadRequest(str(problem))
 
     raise NotFound("no command %r" % command)
+
+
+def api_compare(body):
+    """Start a comparison: one room, several methods, the same seed."""
+    number = int(body.get("room", 1))
+    if not rooms.is_built(number):
+        raise BadRequest("room %d is not built yet" % number)
+
+    try:
+        comparison = Comparison(number,
+                                algorithm_keys=body.get("algorithms"),
+                                parameters=body.get("parameters"),
+                                seed=body.get("seed"))
+    except (ValueError, KeyError) as problem:
+        raise BadRequest(str(problem))
+
+    identifier = _remember(comparison)
+    return {"comparison": identifier,
+            "describe": comparison.describe(),
+            "snapshot": comparison.snapshot()}
+
+
+def api_compare_advance(identifier, body):
+    comparison = _session(identifier)
+    budget = body.get("budgetMs")
+    if budget is not None:
+        budget = min(float(budget), config.TURBO_BUDGET_MS)
+    return comparison.advance(budget_ms=budget)
 
 
 def api_release(identifier):
@@ -287,10 +320,19 @@ class Handler(BaseHTTPRequestHandler):
                 self._send_json(api_create(body))
                 return
 
+            if route == "/api/comparison":
+                self._send_json(api_compare(body))
+                return
+
             parts = route.split("/")
             # /api/session/<id>/<command>
             if len(parts) == 5 and parts[2] == "session":
                 self._send_json(api_command(parts[3], parts[4], body))
+                return
+            # /api/comparison/<id>/advance
+            if len(parts) == 5 and parts[2] == "comparison" \
+                    and parts[4] == "advance":
+                self._send_json(api_compare_advance(parts[3], body))
                 return
 
             self._send_error(404, "no such endpoint")
@@ -306,7 +348,7 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_DELETE(self):
         parts = self.path.split("?", 1)[0].split("/")
-        if len(parts) == 4 and parts[2] == "session":
+        if len(parts) == 4 and parts[2] in ("session", "comparison"):
             self._send_json(api_release(parts[3]))
             return
         self._send_error(404, "no such endpoint")

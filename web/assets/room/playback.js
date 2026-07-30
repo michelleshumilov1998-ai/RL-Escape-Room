@@ -112,13 +112,31 @@ window.Playback = (function () {
       if (on.state) on.state(self.state);
     }
 
+    /**
+     * The episode with a given episode *number* — not array position.
+     *
+     * The batch is a sample of the run: episodes 0, 1, 2, 43, 86, … 1499 sit
+     * at positions 0…39. So a number is not a position, and treating one as
+     * the other quietly resolves to nothing for every episode whose number
+     * runs past the length of the batch. That is what left the step inspector
+     * offering three episodes out of forty.
+     */
+    function episodeNumbered(number) {
+      if (!self.batch) return null;
+      const found = self.batch.episodes.filter(
+        episode => episode.index === number);
+      return found.length ? found[0] : null;
+    }
+
     /** The episode playback is currently walking, batch or replay. */
     function currentEpisode() {
       if (!self.batch || !self.batch.episodes.length) return null;
-      const index = self.selected === null ? self.cursor.episode
-                                           : self.selected;
-      return self.batch.episodes[Math.min(index,
-                                          self.batch.episodes.length - 1)];
+      // A selection is an episode number; the cursor is a position, because
+      // it is counting its way along the batch.
+      if (self.selected !== null) return episodeNumbered(self.selected);
+      const at = Math.min(self.cursor.episode,
+                          self.batch.episodes.length - 1);
+      return self.batch.episodes[at];
     }
 
     /* -------------------------------------------------------------------
@@ -424,10 +442,9 @@ window.Playback = (function () {
         return self.batch ? self.batch.episodes.length : 0;
       },
 
-      /** One episode by index, for the replay browser. Read-only. */
-      episodeAt: function (index) {
-        if (!self.batch) return null;
-        return self.batch.episodes[index] || null;
+      /** One episode by its episode number, for the replay browser. */
+      episodeAt: function (number) {
+        return episodeNumbered(number);
       },
 
       /**
@@ -438,9 +455,8 @@ window.Playback = (function () {
        * a run is going and change nothing about it. The position is the
        * step's own — never interpolated, because this is a still.
        */
-      frameAt: function (episodeIndex, stepIndex) {
-        if (!self.batch) return null;
-        const episode = self.batch.episodes[episodeIndex];
+      frameAt: function (episodeNumber, stepIndex) {
+        const episode = episodeNumbered(episodeNumber);
         if (!episode) return null;
 
         const last = episode.steps.length - 1;

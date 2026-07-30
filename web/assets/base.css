@@ -40,6 +40,9 @@
   --cell-hazard: color-mix(in srgb, var(--hazard), var(--base) 58%);
   --cell-start: color-mix(in srgb, var(--muted), var(--base) 64%);
   --cell-goal: color-mix(in srgb, var(--goal), var(--base) 52%);
+  /* A generator that is not running yet: plain white, so it reads as inert
+     rather than as one more coloured thing with a meaning to remember. */
+  --generator-off: #E9EFF6;
 
   --font: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
           "Helvetica Neue", Arial, sans-serif;
