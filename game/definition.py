@@ -84,12 +84,72 @@ def _info(room):
     return described
 
 
+def _schema(room, parameters):
+    """The parameter controls, with this run's own defaults filled in."""
+    return [
+        dict(_parameter(name), default=parameters.get(
+            name, config.PARAMETERS[name]["default"]))
+        for name in room["parameters"]
+    ]
+
+
+def _metric(room):
+    # The two screens read their one metric from different places, so the key
+    # cannot simply be passed through. The planner screen's strip takes a
+    # *session* measurement straight off the algorithm snapshot ("meanReward");
+    # the room screen averages a field of EpisodeMetrics over the recent past,
+    # so the key has to name one of those. The label is the room's own either
+    # way, and stays true because the averaging is what makes it a mean.
+    return {
+        "key": room.get("episode_metric", "reward"),
+        "label": room["metric"]["label"],
+        "format": room["metric"]["format"],
+    }
+
+
+def build_continuous(room, env, parameters):
+    """The static half of a room that has no grid under it.
+
+    Room 4's entities are not cells and cannot be read off a layout, so the
+    world states them itself and this only translates the surrounding fields.
+    `isGrid` false is what tells the screen to draw no cell boundaries and to
+    skip the value heatmap and the policy arrows, both of which are overlays
+    over squares that do not exist here.
+    """
+    entities = env.entities()
+    kinds_used = {entity["type"] for entity in entities}
+    # The agent is never furniture, and is always on screen.
+    kinds_used.add("agent")
+
+    return {
+        "id": room["key"],
+        "name": room["name"],
+        "sector": room["sector"],
+        "worldSize": {"width": env.width, "height": env.height},
+        "isGrid": False,
+        "entities": entities,
+        "entityTypes": {kind: _entity_type(config.ENTITIES[kind])
+                        for kind in sorted(kinds_used)},
+        "info": _info(room),
+        "parameterSchema": _schema(room, parameters),
+        "metric": _metric(room),
+        # A presentation hint and nothing else. One step here is a fiftieth of
+        # a second and an episode is several hundred of them, so replaying at
+        # the rate that suits a ten-cell grid would take minutes; this plays a
+        # flight back in something close to the time it took.
+        "playback": {"stepsPerSecond": 50.0},
+    }
+
+
 def build(room, env, parameters):
     """The static half of a room: layout, words, parameter schema.
 
     `parameters` supplies the defaults this run actually started with, which
     are not always the global ones — a room may override any of them.
     """
+    if not getattr(env, "is_grid", True):
+        return build_continuous(room, env, parameters)
+
     rows, cols = env.rows, env.cols
     cell = 1.0
 
@@ -133,21 +193,6 @@ def build(room, env, parameters):
         "entities": entities,
         "entityTypes": entity_types,
         "info": _info(room),
-        "parameterSchema": [
-            dict(_parameter(name), default=parameters.get(
-                name, config.PARAMETERS[name]["default"]))
-            for name in room["parameters"]
-        ],
-        # The two screens read their one metric from different places, so the
-        # key cannot simply be passed through. The planner screen's strip
-        # takes a *session* measurement straight off the algorithm snapshot
-        # ("meanReward"); this screen averages a field of EpisodeMetrics over
-        # the recent past, so the key has to name one of those. The label is
-        # the room's own either way, and stays true because the averaging is
-        # what makes it a mean.
-        "metric": {
-            "key": room.get("episode_metric", "reward"),
-            "label": room["metric"]["label"],
-            "format": room["metric"]["format"],
-        },
+        "parameterSchema": _schema(room, parameters),
+        "metric": _metric(room),
     }

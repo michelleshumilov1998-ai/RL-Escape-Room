@@ -362,8 +362,10 @@ function paint() {
     snapshot.progress.count + ' ' + snapshot.progress.unit;
 
   if (replaying && snapshot.replay) {
+    // `steps` is the frames, and the first of them is the starting position
+    // rather than a step taken.
     dom.strip.metric.textContent =
-      snapshot.replay.steps + ' steps · ' +
+      (snapshot.replay.steps.length - 1) + ' steps · ' +
       snapshot.replay.totalReward.toFixed(0) + ' reward';
   } else if (snapshot.metric.value === null
              || snapshot.metric.value === undefined) {
@@ -437,6 +439,18 @@ function paintAnalysis() {
    The loop
    ------------------------------------------------------------------- */
 
+/**
+ * The cell one replay frame is at.
+ *
+ * A frame carries a `position` in world units — a cell's *centre*, so a grid
+ * cell lands on half-integers — because that is the one coordinate system
+ * every room is described in. This screen draws in rows and columns, so the
+ * half is taken back off here, in one place.
+ */
+function frameCell(frame) {
+  return [frame.position.y - 0.5, frame.position.x - 0.5];
+}
+
 function agentPosition() {
   const snapshot = Sim.snapshot;
   const replay = snapshot.replay;
@@ -446,10 +460,10 @@ function agentPosition() {
     return { row: cell[0], col: cell[1] };
   }
 
-  const frames = replay.frames;
+  const frames = replay.steps;
   const index = Math.min(ui.replay.index, frames.length - 1);
-  const current = frames[index].cell;
-  const next = frames[Math.min(index + 1, frames.length - 1)].cell;
+  const current = frameCell(frames[index]);
+  const next = frameCell(frames[Math.min(index + 1, frames.length - 1)]);
 
   if (reduceMotion.matches) return { row: current[0], col: current[1] };
 
@@ -476,9 +490,9 @@ function advanceReplay(dt) {
   while (ui.replay.elapsed >= 1) {
     ui.replay.elapsed -= 1;
     ui.replay.index += 1;
-    if (ui.replay.index >= replay.frames.length - 1) {
+    if (ui.replay.index >= replay.steps.length - 1) {
       // Hold on the final frame before going round again.
-      ui.replay.index = replay.frames.length - 1;
+      ui.replay.index = replay.steps.length - 1;
       ui.replay.elapsed = 0;
       ui.replay.waiting = config.replay_pause_seconds;
       break;
@@ -489,9 +503,9 @@ function advanceReplay(dt) {
 function replayTrail() {
   const snapshot = Sim.snapshot;
   if (snapshot.state !== 'REPLAYING' || !snapshot.replay) return null;
-  return snapshot.replay.frames
+  return snapshot.replay.steps
     .slice(0, ui.replay.index + 1)
-    .map(frame => frame.cell);
+    .map(frameCell);
 }
 
 async function trainingWork(dt) {

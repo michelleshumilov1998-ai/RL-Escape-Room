@@ -20,16 +20,22 @@ how much work that turns into.
 import random
 import time
 
-from game import algorithms, config, definition, rooms
+from game import algorithms, config, definition, recorder, rooms
 from game.algorithms.base import Transition
+from game.drone import ACTION_NAMES as DRONE_ACTION_NAMES
+from game.drone import DroneWorld
 from game.grid import ACTION_ARROWS, ACTION_NAMES, GridWorld
 from game.reactor import ReactorWorld
-from game.recorder import Recorder
 
 # Which environment a room is built on. Most rooms are the plain grid; a room
-# with things that move on their own says so by naming its own class here,
-# which is a change to this table and to nothing else.
-WORLDS = {"reactor": ReactorWorld}
+# with things that move on their own, or with no grid at all, says so by naming
+# its own class here, which is a change to this table and to nothing else.
+WORLDS = {"reactor": ReactorWorld, "drone": DroneWorld}
+
+# What an action is called, per world. Room 4's actions are thrusts and are
+# neither named nor numbered like a grid's four directions, so the recorder is
+# handed the right table rather than the grid's one regardless of the room.
+ACTION_NAMES_FOR = {"drone": DRONE_ACTION_NAMES}
 
 IDLE = "IDLE"
 TRAINING = "TRAINING"
@@ -100,11 +106,49 @@ class Session:
                 for name, reward in self.REWARD_PARAMETERS.items()
                 if name in self.parameters}
 
+    # Parameters that shape the *world* rather than the learning, and which
+    # the world reads off its own room dict. Laid over the room below so a
+    # world never has to know that a slider exists.
+    WORLD_PARAMETERS = ("wind", "landing_speed")
+
+    def _room_for_world(self):
+        """The room, with any world-shaping parameter laid over the top.
+
+        Room 4's wind strength and landing speed limit are part of the model,
+        so they belong to the environment rather than to the algorithm. Passing
+        them this way keeps `DroneWorld` reading plain numbers off its room and
+        keeps `GridWorld`'s signature untouched. Every one of them is
+        reset-scope for the usual reason: they change the model, and anything
+        already learned was learned against the old one.
+        """
+        overrides = {name: self.parameters[name]
+                     for name in self.WORLD_PARAMETERS
+                     if name in self.parameters}
+        if not overrides:
+            return self.room
+        return dict(self.room, **overrides)
+
+    @property
+    def action_names(self):
+        """What this room's actions are called. Not every room has four."""
+        return ACTION_NAMES_FOR.get(self.room.get("world"), ACTION_NAMES)
+
+    @property
+    def step_limit(self):
+        """How long one episode may run for.
+
+        A room may set its own. Room 4 integrates a fiftieth of a second per
+        step and is ten metres across, so the shared limit would end every
+        flight in mid-air several hundred steps short of the pad.
+        """
+        return int(self.room.get("max_steps",
+                                 config.SESSION["max_steps_per_episode"]))
+
     def _build(self):
         """A fresh environment and a fresh algorithm from the parameters."""
         slip = self.parameters.get("slip", 0.0)
         world = WORLDS.get(self.room.get("world"), GridWorld)
-        self.env = world(self.room, slip=slip, seed=self.seed,
+        self.env = world(self._room_for_world(), slip=slip, seed=self.seed,
                          rewards=self._reward_overrides(),
                          collapse=self.parameters.get("collapse_chance", 0.0))
         # The algorithm's own generator, separate from the environment's, so
@@ -116,11 +160,11 @@ class Session:
         self.episode = None
         # Only the learners have episodes to record; a planner never takes a
         # step in the environment at all.
-        self.recorder = Recorder(
+        self.recorder = recorder.Recorder(
             self.env,
             config.SESSION["episodes_recorded"],
             int(self.parameters.get("episodes", 0)),
-            ACTION_NAMES) if self.learns else None
+            self.action_names) if self.learns else None
 
     @property
     def learns(self):
@@ -257,7 +301,7 @@ class Session:
 
     def _learn_one_step(self):
         """One step taken, one update applied, and the episode kept in place."""
-        limit = config.SESSION["max_steps_per_episode"]
+        limit = self.step_limit
 
         if self.episode is None:
             state = self.env.reset()
@@ -364,7 +408,7 @@ class Session:
     # ------------------------------------------------------------------
 
     def start_replay(self, limit=None):
-        """Record one greedy run and hand it over.
+        """Record one run of the learned policy and hand it over.
 
         The trajectory is recorded once and animated by the page, so replay
         cannot touch the policy however long it is left looping.
@@ -375,44 +419,81 @@ class Session:
         return self.snapshot()
 
     def _record_greedy_run(self, limit=None):
-        limit = limit or config.SESSION["max_steps_per_episode"]
+        """One run with the exploration taken out, shaped as an Episode.
+
+        THE DISTINCTION THIS EXISTS TO DRAW
+        A recorded episode is what the agent *did* while it was still
+        exploring. ε does not decay to zero — it stops at `epsilon_min`, 0.05
+        by default — so even the last episode of a finished run takes a random
+        step roughly one time in twenty, and the route visibly wanders. That
+        is the truth about training and it is worth being able to watch, but
+        it is not the route the agent learned and nothing should present it as
+        one. This is what the agent would do if it stopped exploring, which is
+        the only run that can honestly be called the route it settled on.
+
+        It is shaped as a contract Episode rather than as anything of its own
+        so the page replays it through exactly the path it replays a recorded
+        episode through — same frames, same renderer, same step inspector.
+        It used to carry a shape of its own that predated the contract, which
+        no screen could draw; that is most of why nothing ever showed it.
+        """
+        limit = limit or self.step_limit
         state = self.env.reset(seed=self.seed)
-        # A state may carry more than a cell; a frame only ever wants the
-        # two numbers the grid is drawn on.
-        cell = self.env.cell_of if hasattr(self.env, "cell_of") else tuple
-        frames = [{"cell": list(cell(state)), "reward": 0.0, "total": 0.0,
-                   "action": None, "slipped": False, "battery": False}]
-        total = 0.0
-        outcome = "lost"
-        # Read the policy once, and follow it. `act` would still be
-        # ε-greedy for a learner, and a replay has to show what was learned
-        # rather than what it was still trying out.
+
+        # How the policy is asked for the action at one state.
+        #
+        # A grid room can hand over its whole policy as a table and be read
+        # from it, which is the cheaper thing to do for a room that has one.
+        # Room 4 cannot: its state is four real numbers, so there is no table
+        # to build and `greedy_policy` returns empty. `greedy_action` answers
+        # for one state at a time, which is all this loop ever needed —
+        # `act` would not do, because for a learner it is still ε-greedy and
+        # this has to show what was learned rather than what it was trying out.
         policy = self.algorithm.greedy_policy()
+        if policy:
+            chosen = policy.get
+        else:
+            chosen = getattr(self.algorithm, "greedy_action", None)
+            if chosen is None:
+                chosen = lambda _state: None       # noqa: E731 - nothing to run
+
+        names = self.action_names
+        steps = [recorder.frame(self.env, names, state, 0.0, None)]
+        total = 0.0
+        # A policy can also simply fail to arrive: it may walk into a hazard,
+        # or loop until the step limit. Both are outcomes worth showing rather
+        # than hiding, so they are named the same way a recorded episode names
+        # them and the page needs no special case for either.
+        outcome = "timeout"
 
         for _ in range(limit):
-            action = policy.get(state)
+            action = chosen(state)
             if action is None:
                 break
             state, reward, done, info = self.env.step(action)
             total += reward
-            frames.append({
-                "cell": list(cell(state)),
-                "reward": reward,
-                "total": total,
-                "action": action,
-                "slipped": info["slipped"],
-                # Carried so a replay can show the battery being picked up.
-                "battery": bool(state[2]) if len(state) > 2 else False,
-            })
-            if not done:
-                continue
-            outcome = "goal" if info["goal"] else "hazard"
-            break
+            steps.append(recorder.frame(self.env, names, state, reward, action))
+            if done:
+                outcome = "success" if info["goal"] else "failure"
+                break
 
         # Leave the environment where a replay found it.
         self.env.reset(seed=self.seed)
-        return {"frames": frames, "steps": len(frames) - 1,
-                "totalReward": total, "outcome": outcome}
+
+        return {
+            # One past the last episode there was, so it cannot collide with
+            # a recorded episode's number and the page can address it by
+            # number like any other.
+            "index": getattr(self.algorithm, "episodes", 0),
+            "steps": steps,
+            "totalReward": total,
+            # No exploration in it at all, which is the whole point of it.
+            "epsilon": 0.0,
+            "outcome": outcome,
+            # What tells the page this is the learned route and not one of the
+            # training episodes it sits beside in the batch.
+            "greedy": True,
+        }
 
     # ------------------------------------------------------------------
     # What the page is told
@@ -423,7 +504,9 @@ class Session:
         if self.state not in (TRAINED, REPLAYING):
             return False
         if self.replay is not None:
-            return self.replay["outcome"] == "goal"
+            # The greedy run names its outcomes the way a recorded episode
+            # does, so this is "success" and not a word of its own.
+            return self.replay["outcome"] == "success"
         return self.algorithm.finished
 
     def curve(self):
@@ -568,8 +651,14 @@ class Session:
                 dict(config.PARAMETERS[name], name=name)
                 for name in self.room["parameters"]
             ],
-            "actions": [{"id": action, "name": ACTION_NAMES[action],
-                         "arrow": ACTION_ARROWS[action]}
+            # Room 4's thrusts have names but no arrow: an arrow means "it
+            # went that way", and a thrust is an acceleration rather than a
+            # move. The field is kept for every room so the page needs no
+            # branch, and left empty where it would be a lie.
+            "actions": [{"id": action,
+                         "name": self.action_names[action],
+                         "arrow": ACTION_ARROWS.get(action, "")
+                                  if self.action_names is ACTION_NAMES else ""}
                         for action in self.env.actions()],
         }
 

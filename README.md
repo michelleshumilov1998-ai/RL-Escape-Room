@@ -546,6 +546,19 @@ value table as a heatmap and the greedy policy as arrows.
   loop carries the fractional remainder between frames, because asking for a
   whole step every frame would make the slowest speed twenty times too fast at
   60 fps. Turbo is not paced at all.
+* **Once it is trained, Play shows the route it learned** — and that is a
+  different thing from any episode it trained on. ε stops at `epsilon_min`,
+  0.05 by default, rather than decaying to zero, so even the last episode of a
+  finished run still takes a random step about one time in twenty and visibly
+  doubles back on itself. What Play shows instead is one run of the greedy
+  policy with the exploration taken out. Measured in room 2 at the defaults:
+  the last recorded episode that reached the exit wanders through 22 steps for
+  +76, with a step into the west wall in the middle of it, and the policy
+  behind that same episode walks the route cleanly in 21 for +79. It is
+  recorded once, on the server, and animated by the page, so leaving it looping
+  cannot touch what was learned. When the policy does *not* get out — an
+  undertrained run loops until the 400-step limit — the panel says so rather
+  than presenting the wandering as the answer.
 * **Graphs fill in as it learns**, pulled from the recording every two seconds.
 * **Episode replay** — 40 whole episodes are kept per run, spread across it with
   the first and last three always included, since that is where behaviour differs

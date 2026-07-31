@@ -207,6 +207,33 @@ ENTITIES = {
         "label": "One-way door", "colour": "--cell-start", "shape": "oneway",
         "in_legend": True, "role": "static",
     },
+
+    # ---- room 4's furniture -------------------------------------------
+    # None of these is a tile. The chamber has no grid, so the room hands its
+    # entities over directly (`DroneWorld.entities`) and each carries a real
+    # size in metres rather than being one cell square.
+    "pad": {
+        "label": "Landing pad", "colour": "--goal", "shape": "pad",
+        "in_legend": True, "role": "goal",
+    },
+    "pillar": {
+        "label": "Pillar", "colour": "--cell-wall", "shape": "pillar",
+        "in_legend": True, "role": "static",
+    },
+    # Drawn with arrows, which is why the entity carries a vector: the
+    # renderer draws the direction it is given without knowing what wind is.
+    "wind": {
+        "label": "Wind band", "colour": "--cell-slippery", "shape": "wind",
+        "in_legend": True, "role": "static",
+    },
+    "slow": {
+        "label": "Thick air", "colour": "--cell-start", "shape": "slow",
+        "in_legend": True, "role": "static",
+    },
+    "boost": {
+        "label": "Thruster overcharge", "colour": "--hazard", "shape": "boost",
+        "in_legend": True, "role": "hazard",
+    },
 }
 
 # ----------------------------------------------------------------------
@@ -314,6 +341,54 @@ PARAMETERS = {
         "scope": "live",
         "explanation": "Exploration is multiplied by this after every "
                        "episode.",
+    },
+
+    # ---- room 4's own -------------------------------------------------
+    # How many overlapping grids of tiles the function approximation covers
+    # the state space with. More resolves position and speed more finely and
+    # costs proportionally more memory; the step size is divided by this
+    # number, so raising it does not also raise the effective learning rate.
+    "tilings": {
+        "label": "Tilings",
+        "symbol": "",
+        "minimum": 1, "maximum": 16, "step": 1, "default": 8,
+        "scope": "reset",
+        "explanation": "How many offset grids of tiles the state space is "
+                       "covered with. One is a single coarse grid and "
+                       "generalises badly; eight overlap so that what is "
+                       "learned in one place carries to the places near it.",
+    },
+    # The control method's resolution, and the whole point of exposing it: the
+    # discretised table fails at both ends of this slider, for opposite
+    # reasons. See `algorithms/discretised_q.py`.
+    "buckets": {
+        "label": "Buckets per axis",
+        "symbol": "",
+        "minimum": 3, "maximum": 20, "step": 1, "default": 8,
+        "scope": "reset",
+        "explanation": "Only for the discretised table: how finely each axis "
+                       "is rounded off. Low values cannot tell a gentle "
+                       "approach from a fast one; high values never see the "
+                       "same bucket twice.",
+    },
+    "wind": {
+        "label": "Wind strength",
+        "symbol": "",
+        "minimum": 0.0, "maximum": 2.0, "step": 0.1, "default": 1.0,
+        "scope": "reset",
+        "explanation": "A multiplier on the wind band. Constant within a run "
+                       "on purpose: wind that changed between episodes would "
+                       "be a force the state cannot see, and the room would "
+                       "stop being Markov.",
+    },
+    "landing_speed": {
+        "label": "Landing speed limit",
+        "symbol": "",
+        "minimum": 0.05, "maximum": 1.0, "step": 0.01, "default": 0.30,
+        "scope": "reset",
+        "explanation": "How slowly the drone has to be going on both axes for "
+                       "touching the pad to count as a landing. Raise it far "
+                       "enough and the room stops being about control.",
     },
 }
 

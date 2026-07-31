@@ -130,6 +130,10 @@
     lastBatchAt: 0,
     fetchingBatch: false,
     recorded: null,
+    /* The learned route: one run of the policy with the exploration taken
+       out, fetched once when training finishes. Null until then, because
+       until then there is no settled policy to run. */
+    greedy: null,
     /* Steps owed but not yet whole, carried between frames so the speeds
        mean what they say per second. */
     owed: 0,
@@ -437,7 +441,7 @@
      ------------------------------------------------------------------- */
 
   /**
-   * The episode that counts as "the route it settled on".
+   * The best of the recorded *training* episodes.
    *
    * The last one that actually reached the exit, rather than simply the
    * last one played: with exploration never decaying to zero, the final
@@ -445,18 +449,52 @@
    * anybody wants to watch. Falls back to the last episode played when
    * nothing has succeeded, because the most recent failure is more use
    * than refusing to show anything.
+   *
+   * This is about what training managed while it was still exploring, which
+   * is the right question for `isCleared` and the wrong one for the route to
+   * display. See `finalRoute`.
    */
-  function finalRoute() {
-    const played = ui.playback.metrics;
+  function bestRecordedRoute() {
+    const played = recordedMetrics();
     if (!played.length) return null;
 
     for (let at = played.length - 1; at >= 0; at -= 1) {
       const episode = ui.playback.episodeAt(played[at].episode);
       if (episode && episode.outcome === 'success') {
-        return { index: episode.index, succeeded: true };
+        return { index: episode.index, succeeded: true, greedy: false };
       }
     }
-    return { index: played[played.length - 1].episode, succeeded: false };
+    return { index: played[played.length - 1].episode, succeeded: false,
+             greedy: false };
+  }
+
+  /**
+   * The route to show as the one the agent settled on.
+   *
+   * The greedy run — the learned policy followed with the exploration taken
+   * out — and *not* a recorded episode, which is the distinction this was
+   * getting wrong. ε stops at `epsilon_min`, 0.05 by default, rather than
+   * decaying to zero, so every episode that was trained on still takes a
+   * random step about one time in twenty and the route visibly doubles back
+   * on itself. Room 2 at the defaults is the plain case: the last recorded
+   * episode that reached the exit wanders through 22 steps with a step into
+   * the west wall in the middle of it, and the policy behind that episode
+   * walks the same route cleanly in 21. Showing the first and calling it the
+   * optimal route is not a presentation quibble — it is showing exploration
+   * noise and labelling it as the answer.
+   *
+   * Falls back to the best recorded attempt while training is still running,
+   * since until it finishes there is no settled policy to run.
+   */
+  function finalRoute() {
+    if (ui.greedy) {
+      return {
+        index: ui.greedy.index,
+        succeeded: ui.greedy.outcome === 'success',
+        greedy: true,
+      };
+    }
+    return bestRecordedRoute();
   }
 
   /**
@@ -470,7 +508,11 @@
    */
   function isCleared() {
     if (ui.everCleared) return true;
-    const route = finalRoute();
+    // Deliberately the recorded route and not the greedy one: the test is
+    // whether the agent ever actually got out, which is a fact about the run
+    // that happened. A policy that would get out is a different claim, and it
+    // is not this one.
+    const route = bestRecordedRoute();
     if (route && route.succeeded) ui.everCleared = true;
     return ui.everCleared;
   }
@@ -487,9 +529,30 @@
     const route = finalRoute();
     if (!route) {
       dom.finalRouteHint.textContent =
-        'Nothing has been played yet, so there is no route to show.';
+        'Nothing has been recorded yet, so there is no route to show.';
       return;
     }
+
+    // The greedy run, once training has finished: say what it is, because
+    // "the learned policy with no exploration" is exactly what makes it
+    // different from the episodes listed below it.
+    if (route.greedy) {
+      const steps = ui.greedy.steps.length - 1;
+      if (!route.succeeded) {
+        dom.finalRouteHint.textContent =
+          'The learned policy, followed with no exploration — and it does not '
+          + 'reach the exit (' + OUTCOME_LABELS[ui.greedy.outcome] + ' after '
+          + steps + ' steps). Training has not converged on a route out.';
+        return;
+      }
+      dom.finalRouteHint.textContent =
+        'The route it settled on: the learned policy followed with the '
+        + 'exploration taken out, ' + steps + ' steps for '
+        + ui.greedy.totalReward.toFixed(0) + '. The training episodes below '
+        + 'still wander, because ε never reaches zero.';
+      return;
+    }
+
     if (!route.succeeded) {
       dom.finalRouteHint.textContent =
         'No episode has reached the exit yet — this shows the most recent '
@@ -498,7 +561,8 @@
     }
     dom.finalRouteHint.textContent =
       'Episode ' + (route.index + 1) + ', the last one that reached the exit. '
-      + 'Played at a readable speed whatever the training speed was.';
+      + 'Training is still going, so this is an exploratory episode rather '
+      + 'than the settled route.';
   }
 
   /* ---------------------------------------------------------------------
@@ -587,13 +651,24 @@
     const episode = ui.playback.episodeAt(selected);
     if (!episode) return;
 
-    const rows = [
-      ['Episode', String(selected + 1)],
-      ['Outcome', OUTCOME_LABELS[episode.outcome] || episode.outcome],
-      ['Reward', episode.totalReward.toFixed(0)],
-      ['Exploration', episode.epsilon.toFixed(3)],
-      ['Steps', String(episode.steps.length - 1)],
-    ];
+    // The learned route sits in the batch beside the training episodes but it
+    // is not one of them, and numbering it as though it were would claim an
+    // episode that never ran.
+    const rows = episode.greedy
+      ? [
+        ['Route', 'Learned policy'],
+        ['Outcome', OUTCOME_LABELS[episode.outcome] || episode.outcome],
+        ['Reward', episode.totalReward.toFixed(0)],
+        ['Exploration', 'none'],
+        ['Steps', String(episode.steps.length - 1)],
+      ]
+      : [
+        ['Episode', String(selected + 1)],
+        ['Outcome', OUTCOME_LABELS[episode.outcome] || episode.outcome],
+        ['Reward', episode.totalReward.toFixed(0)],
+        ['Exploration', episode.epsilon.toFixed(3)],
+        ['Steps', String(episode.steps.length - 1)],
+      ];
     const list = element('dl', 'readout');
     rows.forEach(pair => {
       list.appendChild(element('dt', null, pair[0]));
@@ -728,8 +803,11 @@
       return;
     }
 
+    // Counted against the episodes that were recorded, not against the batch,
+    // because the batch also carries the learned route — which is not an
+    // episode and must not inflate the total.
     const played = ui.playback.episodesPlayed;
-    dom.strip.episodes.textContent = played + ' / ' + ui.playback.total
+    dom.strip.episodes.textContent = played + ' / ' + recordedMetrics().length
                                    + ' episodes';
     dom.strip.state.textContent = STATE_LABELS[ui.playback.state];
 
@@ -797,7 +875,13 @@
 
     // Deliberately still available once FINISHED — that is exactly when
     // the finished route is what you want to look at.
-    disable(dom.finalRoute, busy || ui.playback.episodesPlayed === 0);
+    //
+    // The test is whether there is a route to show. It used to be
+    // `episodesPlayed === 0`, which counted episodes *played back* — and now
+    // that training finishes straight into the learned route, nothing is ever
+    // played back, so that count stays zero and the button would be disabled
+    // exactly when it is most wanted.
+    disable(dom.finalRoute, busy || finalRoute() === null);
 
     disable(dom.replayPlay, false);
     disable(dom.replayStep, false);
@@ -940,24 +1024,48 @@
     ui.liveFrame = null;
   }
 
-  /** Training has reached its episode target. Fetch what was recorded. */
+  /**
+   * Training has reached its episode target.
+   *
+   * Two things are fetched, and they are not the same thing. The recording is
+   * what the agent *did* on the way here, which the graphs and the episode
+   * browser are about. The greedy run is what it would do now if it stopped
+   * exploring — the route it settled on — and that is what Play shows from
+   * here on, because it is the only one of the two that can honestly be
+   * called the route it learned.
+   */
   function finishedTraining() {
     if (ui.trained) return;
     ui.trained = true;
     ui.running = false;
     stopLive();
-    window.Producer.episodes().then(batch => {
-      ui.recorded = batch;
-      ui.playback.load(ui.room, batch);
-      buildEpisodeList();
-      buildInspectorEpisodes();
-      // The recording's own metrics, not the played count — nothing has been
-      // played back yet, and the graphs are about what happened in training.
-      if (ui.repaintCharts) ui.repaintCharts(batch.metrics);
-      // Now the world belongs to the playback controller, so its loop starts.
-      ui.playback.start();
-      paintAll();
-    }).catch(failed);
+    Promise.all([window.Producer.episodes(), window.Producer.replay()])
+      .then(results => {
+        const batch = results[0];
+        const learned = results[1];
+        ui.recorded = batch;
+        ui.greedy = learned;
+        // The learned route rides along inside the batch, so every reader
+        // that resolves an episode by number — the renderer, the scrubber,
+        // the step inspector — reaches it without knowing it is any
+        // different. It stays out of `metrics` on purpose: the episode list
+        // and the charts describe training, and this did not happen during
+        // training.
+        if (learned) batch.episodes = batch.episodes.concat([learned]);
+        ui.playback.load(ui.room, batch);
+        buildEpisodeList();
+        buildInspectorEpisodes();
+        // The recording's own metrics, not the played count — nothing has been
+        // played back yet, and the graphs are about what happened in training.
+        if (ui.repaintCharts) ui.repaintCharts(batch.metrics);
+        // Straight to the learned route, rather than to the top of a batch of
+        // exploratory episodes. Selecting it is what puts playback into
+        // REPLAYING, so Play and Pause drive that one route on a loop.
+        if (learned) ui.playback.selectEpisode(learned.index);
+        // Now the world belongs to the playback controller, so its loop starts.
+        ui.playback.start();
+        paintAll();
+      }).catch(failed);
   }
 
   async function togglePlay() {
@@ -1076,6 +1184,9 @@
     ui.staleReason = '';
     ui.inspect = { episode: null, step: 0 };
     ui.recorded = null;
+    // The route belonged to the policy that was just thrown away. Keeping it
+    // would leave the previous run's route on screen beside a fresh chamber.
+    ui.greedy = null;
     ui.lastBatchAt = 0;
 
     buildLegend();

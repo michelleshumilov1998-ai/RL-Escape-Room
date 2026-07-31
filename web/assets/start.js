@@ -50,7 +50,11 @@ const CONFIG = {
     fadeSeconds: 9,
     sampleInterval: 0.07,
     maxPoints: 420,
-    alpha: 0.30,
+    // Raised with the backdrop: a trail is drawn as muted *over* the
+    // backdrop, so lifting the backdrop and leaving this alone would have
+    // cost the trails the contrast the backdrop gained. These are the
+    // record of the failed attempts, which is the scene's whole subject.
+    alpha: 0.42,
     width: 1.2,
   },
 
@@ -87,9 +91,16 @@ const CONFIG = {
   },
 
   render: {
-    backdropMix: 0.10,       // how far each tone sits from base towards muted
-    farMix: 0.07,
-    midMix: 0.035,
+    // How far each tone sits from base towards muted. The spread matters
+    // more than any single value: these used to run 0 to 0.10, which put
+    // the whole scene inside a ten-value band of near-black and left the
+    // robot and the hazards indistinguishable from the backdrop. Widening
+    // the range lifts the *backdrop* only — the silhouettes stay at base
+    // (nearMix 0), so every one of them gains contrast rather than losing
+    // it, and the depth ordering far > mid > near is unchanged.
+    backdropMix: 0.42,
+    farMix: 0.32,
+    midMix: 0.20,
     nearMix: 0.0,            // the near silhouettes are base itself
     particles: 16,
   },
@@ -811,7 +822,8 @@ function drawHazards() {
       ctx.fillRect(Math.round(droneX - size * 0.5), Math.round(y - size * 0.42),
                    Math.round(size), Math.round(size * 0.16));
       // A dim scan cone, in the silhouette tone rather than the accent.
-      ctx.fillStyle = rgba(palette.muted, 0.07);
+      // Still dim, but 0.07 over the lifted backdrop was nothing at all.
+      ctx.fillStyle = rgba(palette.muted, 0.15);
       ctx.beginPath();
       ctx.moveTo(droneX, y + size * 0.3);
       ctx.lineTo(droneX - size * 0.9, metrics.groundY);

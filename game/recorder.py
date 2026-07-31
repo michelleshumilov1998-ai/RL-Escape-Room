@@ -68,6 +68,33 @@ def wanted_episodes(target, budget):
     return {index for index in chosen if 0 <= index < target}
 
 
+def frame(env, action_names, state, reward, action):
+    """One frame of one episode: a picture of the whole world at a moment.
+
+    A module function rather than a method, because a frame is a fact about
+    the environment and not about recording. Two callers build them: this
+    recorder, passively, while the agent trains; and the greedy replay in
+    `session.py`, which is not a recording at all. Sharing this is what
+    stops a replayed frame from being able to describe the world in a
+    different shape from a recorded one.
+    """
+    # Whatever else this room has that moves or changes appearance. The room
+    # owns that knowledge; a frame only forwards it.
+    entity_states, positions = env.frame_extras(state)
+
+    return {
+        "position": env.world_position(state),
+        # A grid room has no velocity and answers None; room 4's state carries
+        # one, and the renderer uses it to point the drone the way it is going.
+        "velocity": (env.world_velocity(state)
+                     if hasattr(env, "world_velocity") else None),
+        "reward": reward,
+        "action": None if action is None else action_names[action],
+        "entityStates": entity_states,
+        "entityPositions": positions,
+    }
+
+
 class Recorder:
     """Accumulates the episodes it was told to keep, and nothing else."""
 
@@ -152,19 +179,7 @@ class Recorder:
     # ------------------------------------------------------------------
 
     def _frame(self, state, reward, action):
-        # Whatever else this room has that moves or changes appearance. The
-        # room owns that knowledge; the recorder only forwards it.
-        entity_states, positions = self.env.frame_extras(state)
-
-        return {
-            "position": self.env.world_position(state),
-            # Grid rooms have no velocity. Room 4 will.
-            "velocity": None,
-            "reward": reward,
-            "action": None if action is None else self.action_names[action],
-            "entityStates": entity_states,
-            "entityPositions": positions,
-        }
+        return frame(self.env, self.action_names, state, reward, action)
 
     def batch(self):
         """The whole recording, in the order it happened."""

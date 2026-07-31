@@ -6,11 +6,14 @@ imports an algorithm class directly, so adding one is a change to this file
 and nothing else.
 """
 
+from game.algorithms.discretised_q import DiscretisedQLearning
 from game.algorithms.double_q_learning import DoubleQLearning
 from game.algorithms.expected_sarsa import ExpectedSarsa
 from game.algorithms.policy_iteration import PolicyIteration
 from game.algorithms.q_learning import QLearning
 from game.algorithms.sarsa import Sarsa
+from game.algorithms.semi_gradient_q import SemiGradientQLearning
+from game.algorithms.semi_gradient_sarsa import SemiGradientSarsa
 from game.algorithms.value_iteration import ValueIteration
 
 ALGORITHMS = {
@@ -20,6 +23,11 @@ ALGORITHMS = {
     ExpectedSarsa.key: ExpectedSarsa,
     QLearning.key: QLearning,
     DoubleQLearning.key: DoubleQLearning,
+    # Room 4's three: two that approximate, and the one that rounds off and
+    # uses a table, which is there to show what the approximation is for.
+    SemiGradientSarsa.key: SemiGradientSarsa,
+    SemiGradientQLearning.key: SemiGradientQLearning,
+    DiscretisedQLearning.key: DiscretisedQLearning,
 }
 
 

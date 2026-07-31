@@ -88,6 +88,19 @@ window.Producer = (function () {
   }
 
   /**
+   * One run of the learned policy, with the exploration taken out.
+   *
+   * Comes back shaped as an Episode, so it goes wherever a recorded episode
+   * goes. This is the route the agent settled on, which no recorded episode
+   * is: ε stops at its floor rather than reaching zero, so every episode that
+   * was trained on still has random steps in it.
+   */
+  async function replay() {
+    const snapshot = await S.replay();
+    return snapshot ? snapshot.replay : null;
+  }
+
+  /**
    * Back to episode zero with the parameters as they now stand.
    *
    * Reset-scope parameters are applied by the server on Reset, which is why
@@ -108,6 +121,7 @@ window.Producer = (function () {
     hold: hold,
     slice: slice,
     episodes: episodes,
+    replay: replay,
     restart: restart,
 
     /* Read back without a round trip. The shell asks for these while

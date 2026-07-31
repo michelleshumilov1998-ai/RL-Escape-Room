@@ -13,7 +13,14 @@
 
 /* ---- the vignette -------------------------------------------------- *
    A pool of base colour under the middle of the screen, so the type holds
-   its contrast whatever the animation happens to be doing behind it.     */
+   its contrast whatever the animation happens to be doing behind it.
+
+   It has to stay thin. The ellipse covers the band the robot runs in, not
+   just the band the type sits in, so at the 92% it used to open on it was
+   hiding the animation it was supposed to be sitting over. The type only
+   ever needed enough to separate --title from the backdrop behind it, and
+   --title is muted lifted 30% towards white — a long way above the lit
+   backdrop already. These values leave that margin intact.               */
 
 body::after {
   content: "";
@@ -22,8 +29,8 @@ body::after {
   z-index: 1;
   pointer-events: none;
   background: radial-gradient(ellipse 68% 54% at 50% 46%,
-              color-mix(in srgb, var(--base) 92%, transparent) 0%,
-              color-mix(in srgb, var(--base) 74%, transparent) 46%,
+              color-mix(in srgb, var(--base) 60%, transparent) 0%,
+              color-mix(in srgb, var(--base) 38%, transparent) 46%,
               color-mix(in srgb, var(--base) 0%, transparent) 78%);
 }
 

@@ -418,22 +418,194 @@ ROOM3 = {
 }
 
 # ----------------------------------------------------------------------
+# Room 4 — the Drone Test Chamber
+# ----------------------------------------------------------------------
+#
+# The room with no grid under it. Rooms 1 to 3 have finitely many states and a
+# table with a row for each; here the state is four real numbers and there is
+# no table to be had. That is the whole reason this room exists.
+#
+#     state = (x, y, vx, vy)      metres, metres per second
+#     10 x 10 m, integrated every 0.02 s, speed held inside [-1, 1] m/s
+#
+# THE TASK IS THE LANDING, NOT THE ARRIVAL
+# Touching the pad is easy. Touching it at under 0.22 m/s on both axes is the
+# problem, and it is what stops the answer being "aim at the pad and hold full
+# thrust". A fast arrival is a crash and ends the run at -30.
+#
+# WHY THE FURNITURE IS ALL STATIC
+# Every force in this chamber depends on where the drone is and on nothing
+# else, so it stays a function of the state. A gate rising and falling on a
+# timer would break that: the same four numbers would mean "clear" at one
+# moment and "blocked" at the next with nothing in the state saying which.
+# Room 3 can afford its sliding doors because it derives them from the guard's
+# patrol index, which is part of its state; the assignment fixes this room's
+# state at four numbers, so there is no free dimension to hang a phase on.
+# See the note in `game/drone.py`.
+#
+# THE LAYOUT, IN METRES
+#     launch pad   (1.5, 8.2)   bottom left
+#     landing pad  (8.2, 1.6)   top right, 1.6 x 0.9 m
+#     two pillars  in the middle, which the direct line runs into
+#     a wind band  across the top left, blowing down — against the approach
+#     a slow zone  which costs time and makes a gentle arrival easier
+#     a boost zone which shortens the route and costs 5 to enter
+#
+# y increases downwards, as everywhere else in this project.
+
+ROOM4 = {
+    "key": "room4",
+    "number": 4,
+    "built": True,
+    "name": "Drone Test Chamber",
+    "sector": "LAB SECTOR D-07",
+
+    # This room is built on the continuous world rather than the grid.
+    "world": "drone",
+
+    "size": (10.0, 10.0),
+    # The assignment's figure. At this step size a 10 m room is several
+    # hundred steps across, which is why this room has a step limit of its own.
+    "dt": 0.02,
+    # Thrust, in m/s^2. A third of a second of it reaches the speed limit,
+    # which is responsive enough to steer and still slow enough that stopping
+    # has to be planned for rather than done on arrival.
+    #
+    # Measured while setting these: an action pushes along *one* axis, so only
+    # one axis can be decelerated per step, and a drone that has to lose speed
+    # on both alternates and brakes at half the rate. At 2.0 m/s^2 against a
+    # 0.22 m/s limit the best hand-flown approach arrived at 0.242 — a near
+    # miss, and a room whose task is very slightly out of reach is not a
+    # harder room, it is a broken one. These are the numbers that leave the
+    # landing demanding and reachable.
+    "thrust": 3.0,
+    "drag": 0.7,
+    "speed_limit": 1.0,
+
+    "start": (1.5, 8.2),
+    "pad": {"x": 8.2, "y": 1.6, "width": 1.6, "height": 0.9,
+            "landing_speed": 0.30},
+
+    "pillars": [
+        {"x": 4.3, "y": 5.5, "radius": 0.95},
+        {"x": 6.5, "y": 3.5, "radius": 0.80},
+    ],
+
+    "zones": [
+        # Blows downwards across the top left, so the last part of the climb
+        # towards the pad is made against it.
+        {"id": "wind1", "type": "wind", "x": 3.6, "y": 2.6,
+         "width": 3.0, "height": 3.0, "wind": (0.0, 1.4)},
+        # Thick air: costs time, and makes arriving slowly much easier. The
+        # trade this room is built around is that it is not on the short way.
+        {"id": "slow1", "type": "slow", "x": 7.6, "y": 5.4,
+         "width": 2.4, "height": 2.0, "extra_drag": 3.0},
+        # A thruster overcharge: doubles the push, shortens the route, and is
+        # far harder to arrive slowly out of. Charged once per entry.
+        {"id": "boost1", "type": "boost", "x": 2.4, "y": 5.0,
+         "width": 1.6, "height": 2.4, "thrust_scale": 2.0, "danger": True},
+    ],
+
+    # Continuous rewards, unlike the three grid rooms. `progress` multiplies
+    # the metres closed on the pad this step, so it is a rate rather than an
+    # event: at the speed limit one step closes 0.02 m and pays 0.1.
+    "rewards": {"step": -0.01, "progress": 5.0, "wall": -100.0,
+                "danger": -5.0, "goal": 200.0, "hard_landing": -30.0},
+
+    # The assignment asks for function approximation here. The discretised
+    # table is offered beside it because the comparison *is* the lesson: it is
+    # the obvious thing to try, and watching it fail is what shows why the
+    # approximation is needed.
+    "algorithms": ["semi_gradient_sarsa", "semi_gradient_q", "discretised_q"],
+    "algorithm_default": "semi_gradient_sarsa",
+
+    "parameters": ["alpha", "gamma", "epsilon", "epsilon_min",
+                   "epsilon_decay", "tilings", "buckets", "wind",
+                   "landing_speed", "episodes"],
+
+    # γ close to one: the landing is several hundred steps from the launch, so
+    # a discount that would do for a ten-cell grid leaves the pad worth
+    # nothing at all by the time the value reaches the start.
+    "parameter_defaults": {"gamma": 0.995, "alpha": 0.30, "epsilon_min": 0.02,
+                           "epsilon_decay": 0.997, "episodes": 1200},
+
+    # An episode here is hundreds of steps rather than tens, so the shared
+    # 400-step limit would end every run in mid-air before it reached the pad.
+    #
+    # Set against measurement rather than guessed. Hand-flown reference routes
+    # land in 891 steps at their quickest and 1821 at their most cautious, and
+    # the trade between the two is the room; a limit that only admitted the
+    # quickest would be deciding that trade in advance. Early training
+    # episodes are far shorter than any of these — a random thrust reaches a
+    # wall in about ninety steps — so the cost of the generous limit is paid
+    # only once the agent is competent enough to be worth watching.
+    "max_steps": 1800,
+
+    "metric": {"key": "meanReward", "label": "Mean reward", "format": "%.1f"},
+    "episode_metric": "reward",
+    "comparison": True,
+
+    "info": {
+        "objective": "Fly R-5's drone frame to the landing pad and set it "
+                     "down gently. Reaching the pad is not enough: arriving "
+                     "faster than the landing speed on either axis is a crash.",
+        "obstacles": [
+            "There is no grid. The drone moves continuously and is steered by "
+            "thrust, so an action changes where it is going rather than where "
+            "it is — and it is felt several steps later.",
+            "Speed is capped at 1 m/s on each axis, and the chamber is 10 m "
+            "across, so crossing it takes hundreds of 0.02 s steps.",
+            "Touching a wall or a pillar ends the run.",
+            "A wind band across the top left blows downwards, against the "
+            "last part of the approach.",
+            "A patch of thick air on the right costs time but makes a slow "
+            "arrival much easier. It is not on the short way.",
+            "A thruster overcharge on the left doubles the push and shortens "
+            "the route, at 5 to enter — and it is far harder to arrive slowly "
+            "out of it.",
+        ],
+        "actions": "Hold, or thrust up, down, left or right. Thrust is an "
+                   "acceleration, not a move: nothing here steps from one "
+                   "square to the next.",
+        "rewards": [
+            ["Each step", "-0.01"],
+            ["Closing on the pad", "+5 per metre closed"],
+            ["Drifting away from it", "-5 per metre lost"],
+            ["Entering the overcharge", "-5, once per visit"],
+            ["Hitting a wall or a pillar", "-100"],
+            ["Reaching the pad too fast", "-30"],
+            ["Landing gently", "+200"],
+        ],
+        "termination": "The run ends on a landing, on a crash-landing, "
+                       "against a wall or a pillar, and otherwise when the "
+                       "step limit is reached.",
+        "note": "This is the room where a table stops working. The state is "
+                "four real numbers, so there are infinitely many states and "
+                "no row can be kept for each; two states differing in the "
+                "sixth decimal are the same situation and must not be learned "
+                "about separately. The two function-approximation methods "
+                "cover the space with eight overlapping grids of tiles and "
+                "learn a weight per tile, so what is learned about one place "
+                "carries to the places around it. The third method rounds the "
+                "state into buckets and uses an ordinary table; it is here to "
+                "be compared against, and the bucket count is a slider so "
+                "that both ways of failing can be watched.",
+    },
+}
+
+# ----------------------------------------------------------------------
 # The rest, named but not built
 # ----------------------------------------------------------------------
 
 PLACEHOLDERS = [
-    {"key": "room4", "number": 4, "built": False,
-     "name": "Drone Wind Tunnel", "sector": "LAB SECTOR D-07",
-     "algorithms": ["tile_coding_sarsa"],
-     "algorithm_default": "tile_coding_sarsa"},
     {"key": "room5", "number": 5, "built": False,
      "name": "Adaptive Storage Facility", "sector": "LAB SECTOR E-12",
-     "algorithms": ["tile_coding_q"],
-     "algorithm_default": "tile_coding_q"},
+     "algorithms": ["semi_gradient_sarsa"],
+     "algorithm_default": "semi_gradient_sarsa"},
 ]
 
 ROOMS = {ROOM1["number"]: ROOM1, ROOM2["number"]: ROOM2,
-         ROOM3["number"]: ROOM3}
+         ROOM3["number"]: ROOM3, ROOM4["number"]: ROOM4}
 for placeholder in PLACEHOLDERS:
     ROOMS[placeholder["number"]] = placeholder
 
