@@ -2038,6 +2038,12 @@
     buildSpeeds();
     // Its own run on the far end, so comparing never disturbs this one.
     ui.compare = window.Compare.mount(dom.compare, number);
+    /* And it is only offered where it can mean something: a chamber that
+       ships a single method has no method comparison to draw, and the panel
+       takes itself off screen rather than sitting there un-runnable. */
+    if (ui.compare.offerOnlyIfMeaningful) {
+      ui.compare.offerOnlyIfMeaningful(window.Producer.algorithms);
+    }
     ui.clearedFlash = window.Cleared.mount(dom.cleared);
 
     /* The ending sequence. Mounted for every room and shown by none but the

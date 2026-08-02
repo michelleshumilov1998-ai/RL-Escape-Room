@@ -179,12 +179,28 @@ window.Compare = (function () {
     const legend = element('ul', 'legend compare-legend');
     const table = element('dl', 'readout');
 
+    /* THE RESULTS DO NOT EXIST UNTIL THERE ARE RESULTS.
+       These four were appended on mount, so every room showed an empty
+       chart canvas, an empty key and an empty table under the button
+       before anything had been compared -- a blank panel that looked
+       broken. They live in one container now, and it is hidden until a
+       comparison has actually produced two or more curves to draw. */
+    const results = element('div', 'compare-results');
+    results.hidden = true;
+    results.appendChild(label);
+    results.appendChild(canvas);
+    results.appendChild(legend);
+    results.appendChild(table);
+
+    // Said instead of the chart when a comparison cannot be drawn. Never a
+    // blank panel, and never an invented curve.
+    const nothing = element('p', 'hint');
+    nothing.hidden = true;
+
     host.appendChild(button);
     host.appendChild(hint);
-    host.appendChild(label);
-    host.appendChild(canvas);
-    host.appendChild(legend);
-    host.appendChild(table);
+    host.appendChild(results);
+    host.appendChild(nothing);
 
     function nameOf(key) {
       const found = (describe.algorithms || []).filter(
@@ -194,9 +210,28 @@ window.Compare = (function () {
 
     function paint() {
       if (!snapshot) return;
-      const variants = snapshot.variants;
-      const colours = palette(variants.length);
+      const variants = (snapshot.variants || []).filter(
+        variant => variant && variant.curve
+                && variant.curve.points && variant.curve.points.length);
 
+      /* A comparison needs two things to compare. One method that ran, or
+         none, is not a comparison -- and drawing a single curve under the
+         heading "compare methods" would be worse than drawing nothing.
+         This is also the guard the assignment asks for: no method-comparison
+         graph unless at least two methods actually produced data. */
+      if (variants.length < 2) {
+        results.hidden = true;
+        nothing.hidden = false;
+        nothing.textContent = variants.length === 1
+          ? 'Only one method produced a curve, so there is nothing to '
+            + 'compare it against.'
+          : 'No method produced a curve to compare.';
+        return;
+      }
+      nothing.hidden = true;
+      results.hidden = false;
+
+      const colours = palette(variants.length);
       const curve = variants[0].curve;
       label.textContent = curve.label + ' · by ' + (curve.xLabel || 'step');
       draw(canvas, variants, colours);
@@ -276,8 +311,13 @@ window.Compare = (function () {
         paint();
         button.textContent = 'Compare again';
       } catch (problem) {
-        label.textContent = 'Comparison failed: '
-                          + ((problem && problem.message) || problem);
+        // Into the visible message, not the label: the label lives inside
+        // the results container, which stays hidden when there is nothing
+        // to draw -- so a failure written there could never be read.
+        results.hidden = true;
+        nothing.hidden = false;
+        nothing.textContent = 'Comparison failed: '
+                            + ((problem && problem.message) || problem);
         button.textContent = 'Compare methods';
       } finally {
         running = false;
@@ -287,8 +327,29 @@ window.Compare = (function () {
 
     button.addEventListener('click', () => run(parameters));
 
+    /**
+     * Take the whole panel away for a room that has nothing to compare.
+     *
+     * A chamber that offers one method cannot produce a method comparison,
+     * and an option that can only ever fail should not be on screen looking
+     * clickable. Called once the room's algorithm list has arrived.
+     */
+    function offerOnlyIfMeaningful(algorithms) {
+      /* Only ever hide on POSITIVE knowledge that there is nothing to
+         compare. The room's algorithm list arrives asynchronously, so an
+         empty list here means "not known yet" far more often than it means
+         "this chamber has one method" -- and treating the two the same took
+         the panel off screen in every room. */
+      if (!Array.isArray(algorithms) || algorithms.length === 0) return;
+      const section = host.closest('details');
+      const enough = algorithms.length >= 2;
+      if (section) section.hidden = !enough;
+      host.hidden = !enough;
+    }
+
     return {
       setParameters(values) { parameters = values; },
+      offerOnlyIfMeaningful: offerOnlyIfMeaningful,
       release() {
         if (!identifier) return;
         const path = '/api/comparison/' + identifier;

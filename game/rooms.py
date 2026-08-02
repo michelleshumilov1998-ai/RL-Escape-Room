@@ -241,14 +241,14 @@ ROOM1 = {
 #        c0 c1 c2 c3 c4 c5 c6 c7 c8 c9
 ROOM2_GRID = [
     "##########",
-    "#..~~~~..#",
-    "#.######.#",
-    "#.#....#.#",
-    "#.#....#.#",
-    "#.#....#.#",
-    "#.#....#.#",
-    "#.#....#.#",
-    "#SGCCCCGE#",
+    "#.~....~.#",
+    "#~.####.~#",
+    "#.#HHHH#.#",
+    "#.#HHHH#.#",
+    "#.#HHHH#.#",
+    "#.#HHHH#.#",
+    "#.GCCCCG.#",
+    "#S#HHHH#E#",
     "##########",
 ]
 
@@ -278,7 +278,7 @@ ROOM2 = {
     # The slider therefore moves the policy only at the very bottom of its
     # range. That is a property of the documented design, not a defect
     # introduced here, and it is left alone because changing it is a redesign.
-    "rewards": {"step": -1.0, "wall": -2.0, "hazard": -100.0, "goal": 100.0},
+    "rewards": {"step": -1.0, "wall": -2.0, "hazard": -15.0, "goal": 38.0},
 
     # The assignment fixes SARSA here. The others are offered because this
     # room is not "the SARSA room" internally — it is a model-free grid that
@@ -295,7 +295,7 @@ ROOM2 = {
 
     # Optimistic initialisation, as documented: above the best return the
     # room can pay, so every action is tried before one is settled on.
-    "parameter_defaults": {"q_init": 90.0},
+    "parameter_defaults": {"q_init": 30.0},
 
     "metric": {"key": "meanReward", "label": "Mean reward", "format": "%.1f"},
 
@@ -310,9 +310,6 @@ ROOM2 = {
     # maintenance void the briefing describes, rather than like a flat black
     # rectangle. Rows 3-7, columns 3-6 — the pocket enclosed by the walls of
     # r2 and columns 2 and 7, open only downwards onto the planks.
-    "decor": [
-        {"type": "void", "rows": (3, 7), "cols": (3, 6)},
-    ],
 
     # Rooms 2 and 3 support running several methods against the same grid and
     # the same seed, and drawing both learned routes at once.
@@ -323,46 +320,42 @@ ROOM2 = {
                      "given: the only way to find out what a step does is to "
                      "take it.",
         "obstacles": [
-            "The corridor along the top of the lap is iced. A step on it "
-            "can carry the agent sideways instead of where it aimed.",
-            "The span along the bottom is the short way across: two sound "
-            "bridge sections with four collapsing planks between them.",
-            "A plank can give way under the step that lands on it, and that "
-            "is a fall. Four of them in a row, so the risk compounds.",
-            "Survive a plank and it is gone behind you — the span cannot be "
-            "walked back, and a step returning onto a gap is the same fall.",
-            "Above the planks is a sealed maintenance void, open only "
-            "downwards onto the span. Stepping up into it costs a step and "
-            "leads nowhere.",
+            "A shaft fills the middle of the sector. Entering it anywhere "
+            "ends the run.",
+            "One steel span crosses it: two sound deck sections with four "
+            "planks between them. It is the only way over.",
+            "The span is risked once, as R-5 steps on to it. Survive that "
+            "and the whole crossing is made.",
+            "The way round is safe from the span, but four cells of it are "
+            "iced and a step on those can carry the agent sideways.",
         ],
         "actions": "Up, down, left, right. Nothing else.",
-        # This room is *about* the choice between these two, so it is stated
-        # rather than left to be inferred from the layout. `best` is what a
-        # flawless walk earns; the margin between them is the whole design.
         "routes": [
-            {"name": "The span", "steps": 7, "best": 93,
-             "risk": "Four planks in a row, each able to give way under "
-                     "the step that lands on it."},
-            {"name": "The lap", "steps": 21, "best": 79,
-             "risk": "None. Nothing on it can drop the agent."},
+            {"name": "The span", "steps": 9, "best": 29,
+             "risk": "One roll of the dice, taken on the step that puts R-5 "
+                     "on the planks."},
+            {"name": "The way round", "steps": 21, "best": 17,
+             "risk": "Nothing can drop the agent. Four iced cells at the two "
+                     "corners can cost it steps."},
         ],
         "rewards": [
             ["Each step", "-1"],
             ["Walking into a wall", "-1 + (-2) = -3"],
-            ["A plank giving way underfoot", "-1 + (-100) = -101"],
-            ["Reaching the exit", "-1 + 100 = +99"],
+            ["Falling into the shaft", "-1 + (-15) = -16"],
+            ["The span giving way underfoot", "-1 + (-15) = -16"],
+            ["Reaching the exit", "-1 + 38 = +37"],
         ],
-        "termination": "The run ends at the exit door, under a plank that "
-                       "gave way, and otherwise when the step limit is "
-                       "reached.",
-        "note": "The span pays more than the lap when it works: +93 against "
-                "+79. So a method that learns the value of behaving perfectly "
-                "has every reason to take it, and one that learns the value "
-                "of what it is actually doing — random steps and failed "
-                "planks included — does not. Which plank has already gone is "
-                "part of the state here; without that, stepping towards the "
-                "span would be worth an average of \"fine\" and \"fatal\", "
-                "and an average is not a fact about where you are.",
+        "termination": "The run ends at the exit door, in the shaft, under a "
+                       "span that gave way, and otherwise when the step "
+                       "limit is reached.",
+        "note": "The span pays more than the way round when it works: +29 "
+                "against +17. The whole crossing is risked once, on the step "
+                "that puts R-5 on the planks, so the number on the slider is "
+                "the chance of losing a crossing and nothing has to be "
+                "compounded to read it. SARSA learns the value of the route "
+                "it is actually walking \u2014 exploratory steps beside a "
+                "lethal shaft included \u2014 which is why it gives the span "
+                "up earlier than a method that prices only a perfect walk.",
     },
 }
 

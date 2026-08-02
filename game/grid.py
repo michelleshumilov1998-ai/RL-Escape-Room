@@ -331,9 +331,26 @@ class GridWorld:
         return self.teleports[(index + 1) % len(self.teleports)]
 
     def lands_on_sound_plank(self, state, direction):
-        """Whether this move would put the agent on a plank that is still there.
+        """Whether this move is the one that risks the crossing.
 
-        The one question that decides whether a step has a second stage to it.
+        THE PROBABILITY IS PER CROSSING, NOT PER PLANK.
+        It used to be drawn again for every plank the agent stepped on, so a
+        span of four planks failed with probability 1 - (1 - p)^4 while the
+        control beside it was labelled "bridge collapse probability". At the
+        0.10 default that is a 34% chance of dying, not a 10% one, and the
+        number on the slider meant nothing a player could reason with.
+
+        Now it is drawn once, on the step that takes the agent OFF solid
+        ground and ON to the span. Survive that and the whole crossing is
+        made; the planks in the middle are structure, not four more dice.
+        `p` is therefore exactly the chance of losing a crossing, which is
+        what the label has always claimed.
+
+        THIS IS STILL MARKOV, AND NEEDS NO EXTRA STATE
+        "Am I already on the span" is not history — it is the tile the agent
+        is standing on, which is in the state. A step from deck or plank onto
+        a plank continues a crossing that has already been paid for; a step
+        from anywhere else begins one.
         """
         row, col, collapsed = state[0], state[1], state[4]
         delta_row, delta_col = DELTAS[direction]
@@ -342,7 +359,15 @@ class GridWorld:
             return False
         if self.grid[target[0]][target[1]] != COLLAPSING:
             return False
-        return not self.is_collapsed(target, collapsed)
+        if self.is_collapsed(target, collapsed):
+            return False
+        # Already out on the planks: this crossing has been paid for.
+        #
+        # The test is the PLANKS, not the whole span. The sound deck sections
+        # at either end are solid ground -- they are what the agent steps off
+        # from -- so treating them as "already crossing" meant the only way on
+        # to the span never drew at all and the collapse never fired.
+        return self.grid[row][col] != COLLAPSING
 
     def outcomes(self, state, direction):
         """Every way one direction can turn out, as (probability, result).

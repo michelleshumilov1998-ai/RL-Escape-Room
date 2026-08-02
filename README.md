@@ -329,25 +329,70 @@ The model is not given. The only way to find out what a step does is to take it.
 ```
       c0 c1 c2 c3 c4 c5 c6 c7 c8 c9
 r0     #  #  #  #  #  #  #  #  #  #
-r1     #  .  .  .  .  .  .  .  .  #     the safe upper corridor
-r2     #  .  H  H  H  H  H  H  .  #
-r3     #  .  H  H  H  H  H  H  .  #
-r4     #  .  H  H  H  H  H  H  .  #     the shaft
-r5     #  .  H  H  H  H  H  H  .  #
-r6     #  .  H  H  H  H  H  H  .  #
-r7     #  .  H  H  H  H  H  H  .  #
-r8     #  S  G  C  C  C  C  G  E  #     the span
+r1     #  .  ~  .  .  .  .  ~  .  #     the safe corridor, iced at the turns
+r2     #  ~  .  #  #  #  #  .  ~  #
+r3     #  .  #  H  H  H  H  #  .  #
+r4     #  .  #  H  H  H  H  #  .  #
+r5     #  .  #  H  H  H  H  #  .  #     the shaft
+r6     #  .  #  H  H  H  H  #  .  #
+r7     #  .  G  C  C  C  C  G  .  #     the span
+r8     #  S  #  H  H  H  H  #  E  #
 r9     #  #  #  #  #  #  #  #  #  #
 ```
 
 Two ways across, measured by breadth-first search:
 
-* **the span** — 7 steps along the bottom. Two sound bridge sections (`G`) with
-  four collapsing planks (`C`) between them. Crossed cleanly it is worth **+93**.
-* **the lap** — 21 steps: up the west wall, along the corridor at the top, down
-  the east wall. Worth **+79**.
+* **the span** — 9 steps. Two sound deck sections (`G`) with four planks (`C`)
+  between them, and shaft above *and* below every plank, so there is no
+  stepping sideways off it. Crossed cleanly it is worth **+29**.
+* **the way round** — 21 steps, up the west wall and down the east. Nothing on
+  it can drop the agent, but four cells of it are iced. Worth **+17**.
 
-## The collapsing planks
+## What the collapse probability means
+
+**It is sampled once per crossing, not once per plank.** The draw happens on
+the single step that takes R-5 off solid ground and on to the planks; survive
+it and the whole span is made. So the number on the slider *is* the chance of
+losing a crossing:
+
+```
+effective crossing risk = p          (not 1 - (1 - p)^4)
+```
+
+This was the other way round and it made the control unreadable. Four planks
+each drawn independently meant the 0.10 default was really a 34% chance of
+dying, under a label that said 10%, and the learned policy had already given
+the span up by then — so the slider looked broken across its whole useful
+range.
+
+## The reward table, and why it was retuned
+
+```
+step -1        wall -2        fall -15        exit +38
+```
+
+The old table was `goal +100 / hazard -100`, and with it no 10x10 map can put
+the decision anywhere useful. A fall forfeits the exit as well as paying the
+penalty, so the bridge is worth taking only while
+
+```
+crossing risk  <  (steps saved) / (exit + fall penalty + steps walked in)
+```
+
+With +100/-100 and 12 steps saved that is a threshold of about **3%** — the
+span is irrational almost immediately, whatever the map looks like. Bringing
+the exit and the fall down to +38 and -15 moves the same threshold to about
+**25%**, which is where a slider is worth having. Every constraint is kept: a
+step still costs, the exit still pays, a fall is still fifteen times a step,
+and a faster escape still scores higher.
+
+Measured, five seeds each:
+
+| p | 0.00 | 0.05 | 0.10 | 0.20 | 0.30 | 0.40 | 0.60 |
+|---|---|---|---|---|---|---|---|
+| route | span | span | span | span | **mixed 2/5** | round | round |
+
+## The planks in the state
 
 A plank can give way **under the step that lands on it**, and that is a fall
 into the shaft. Survive it and the plank is gone behind you, so the span cannot

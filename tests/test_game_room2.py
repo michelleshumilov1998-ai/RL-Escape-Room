@@ -225,10 +225,11 @@ def test_the_probability_is_seeded_and_reproducible():
     """Two runs at the same setting and seed sample identically."""
     def walk(seed):
         env = world(0.4)
-        state = env.reset(seed=seed)
+        env.reset(seed=seed)
         seen = []
+        env.step(0)                                  # UP, off the start tile
         for _ in range(40):
-            state, reward, done, info = env.step(3)      # RIGHT, onto the span
+            state, reward, done, info = env.step(3)  # RIGHT, onto the span
             seen.append((state, round(reward, 6), done, info["hazard"]))
             if done:
                 break
@@ -241,14 +242,15 @@ def test_the_probability_is_seeded_and_reproducible():
 
 def test_the_probability_governs_how_often_a_crossing_actually_fails():
     """End to end through `step`, not only through the model."""
-    from game.grid import RIGHT
+    from game.grid import RIGHT, UP
     results = {}
     for chance in (0.0, 1.0):
         env = world(chance)
         fell = 0
         for seed in range(40):
             env.reset(seed=seed)
-            for _ in range(6):
+            env.step(UP)                    # (8,1) -> (7,1), beside the deck
+            for _ in range(7):
                 _state, _reward, done, info = env.step(RIGHT)
                 if done:
                     fell += 1 if info["hazard"] else 0
@@ -303,10 +305,14 @@ def test_the_algorithm_grid_and_rewards_are_untouched():
     assert room["algorithm_default"] == "sarsa"
     assert len(room["grid"]) == 10
     assert all(len(line) == 10 for line in room["grid"])
-    # The documented reward table, which is what the README states.
+    # The redesigned reward table. Tuned so the collapse slider actually
+    # moves the learned route; see the note in `rooms.py`.
     assert room["rewards"] == {"step": -1.0, "wall": -2.0,
-                               "hazard": -100.0, "goal": 100.0}
-    # Four collapsing sections, as the README's map has always shown.
+                               "hazard": -15.0, "goal": 38.0}
+    assert room["rewards"]["step"] < 0, "a step must cost something"
+    assert room["rewards"]["goal"] > 0, "the exit must pay"
+    assert room["rewards"]["hazard"] < room["rewards"]["step"] * 10, (
+        "a fall must be far worse than a step")
     assert sum(line.count(COLLAPSING) for line in room["grid"]) == 4
 
 
@@ -328,54 +334,122 @@ def test_no_other_room_reports_a_collapse_row_in_its_readout():
 
 
 # ----------------------------------------------------------------------
-# 13. The maintenance void is scenery, and must stay scenery
+# 13. The redesigned map: a real shaft, and no way to step off the span
 # ----------------------------------------------------------------------
 
-def test_the_void_is_decor_and_not_a_tile():
-    """`decor` dresses the screen. It must not reach the environment."""
+def test_the_shaft_is_real_lethal_tiles_not_scenery():
+    """The middle used to be walkable floor dressed to look like a void."""
     room = rooms.room(ROOM)
-    assert room["decor"], "room 2 lost its maintenance void"
-    # Not a tile: the grid is untouched by it.
-    for line in room["grid"]:
-        assert "V" not in line and "v" not in line
-    # GridWorld has never heard of it.
+    from game.grid import PIT
+    shaft = sum(line.count(PIT) for line in room["grid"])
+    assert shaft == 20, "expected a 4x5 central shaft, found %d cells" % shaft
+    assert "decor" not in room, "the shaft is tiles now, not scenery"
+
+
+def test_no_shaft_cell_can_be_stood_on():
     env = world(0.1)
-    assert not hasattr(env, "decor")
+    from game.grid import PIT
+    for row in range(env.rows):
+        for col in range(env.cols):
+            if env.grid[row][col] != PIT:
+                continue
+            # Entering one ends the run: it is terminal and it is a hazard.
+            for state in env.all_states():
+                if (state[0], state[1]) == (row, col):
+                    assert env.is_terminal(state), (
+                        "shaft cell %s is survivable" % ((row, col),))
 
 
-def test_the_void_changes_no_transition_anywhere():
-    """The proof that the scenery is scenery: the MDP is bit-identical.
-
-    Built once with the decor present and once with it stripped out, and
-    every (state, action) compared. If a decorative rectangle ever starts
-    changing a step, this is what says so.
-    """
-    plain = dict(rooms.room(ROOM))
-    plain.pop("decor", None)
-    with_decor = GridWorld(rooms.room(ROOM), slip=0.2, collapse=0.3)
-    without = GridWorld(plain, slip=0.2, collapse=0.3)
-
-    assert list(with_decor.all_states()) == list(without.all_states())
-    for state in with_decor.all_states():
-        assert with_decor.is_terminal(state) == without.is_terminal(state)
-        for action in with_decor.actions():
-            assert (with_decor.transitions(state, action)
-                    == without.transitions(state, action))
+def test_a_plank_can_never_be_stepped_off_onto_floor():
+    """The reported bug: R-5 could walk up off the span into open floor."""
+    env = world(0.1)
+    from game.grid import COLLAPSING, PIT, BRIDGE, WALL
+    for row in range(env.rows):
+        for col in range(env.cols):
+            if env.grid[row][col] != COLLAPSING:
+                continue
+            for dr, dc in ((-1, 0), (1, 0), (0, -1), (0, 1)):
+                tile = env.grid[row + dr][col + dc]
+                assert tile in (PIT, WALL, BRIDGE, COLLAPSING), (
+                    "plank %s opens onto %r" % ((row, col), tile))
 
 
-def test_the_void_is_drawn_but_only_in_room_two():
-    session = Session(ROOM)
-    described = session.describe()["definition"]
-    kinds = {entity["type"] for entity in described["entities"]}
-    assert "void" in kinds, "the maintenance void is not being drawn"
-    # 5 rows by 4 columns of it.
-    assert sum(1 for e in described["entities"] if e["type"] == "void") == 20
-    for number in rooms.ROOM_NUMBERS:
-        if number == ROOM:
-            continue
-        other = Session(number).describe()["definition"]
-        assert not any(e["type"] == "void" for e in other["entities"]), (
-            "room %d gained scenery it never asked for" % number)
+def test_the_bridge_is_the_only_way_across():
+    """With the span removed the exit must still be reachable, but longer."""
+    from collections import deque
+    room = rooms.room(ROOM)
+    grid = room["grid"]
+
+    def shortest(passable):
+        start = next((r, c) for r in range(10) for c in range(10)
+                     if grid[r][c] == "S")
+        goal = next((r, c) for r in range(10) for c in range(10)
+                    if grid[r][c] == "E")
+        seen = {start: 0}
+        queue = deque([start])
+        while queue:
+            cell = queue.popleft()
+            if cell == goal:
+                return seen[cell]
+            for dr, dc in ((-1, 0), (1, 0), (0, -1), (0, 1)):
+                nxt = (cell[0] + dr, cell[1] + dc)
+                if not (0 <= nxt[0] < 10 and 0 <= nxt[1] < 10):
+                    continue
+                if grid[nxt[0]][nxt[1]] in passable and nxt not in seen:
+                    seen[nxt] = seen[cell] + 1
+                    queue.append(nxt)
+        return None
+
+    everything = set(".SE~=oGC")
+    with_span = shortest(everything)
+    without_span = shortest(everything - set("GC"))
+    assert with_span == 9, with_span
+    assert without_span == 21, without_span
+    assert without_span > with_span, "the span saves nothing"
+
+
+def test_the_collapse_is_sampled_once_per_crossing():
+    """Four planks, and still exactly `p` per attempt -- not 1-(1-p)^4."""
+    from game.grid import RIGHT, UP
+    for chance in (0.25, 0.5):
+        env = world(chance)
+        fell = 0
+        attempts = 400
+        for seed in range(attempts):
+            env.reset(seed=seed)
+            env.step(UP)
+            for _ in range(7):
+                _s, _r, done, info = env.step(RIGHT)
+                if done:
+                    fell += 1 if info["hazard"] else 0
+                    break
+        rate = fell / attempts
+        compounded = 1 - (1 - chance) ** 4
+        assert abs(rate - chance) < 0.06, (
+            "crossing risk %.3f is not the slider value %.2f" % (rate, chance))
+        assert abs(rate - compounded) > 0.1, (
+            "risk still looks like it compounds per plank")
+
+
+def test_the_slippery_cells_are_not_all_equivalent():
+    """Ice where both sideways outcomes are a wall bump teaches nothing."""
+    room = rooms.room(ROOM)
+    grid = room["grid"]
+    ice = [(r, c) for r in range(10) for c in range(10)
+           if grid[r][c] in "~=o"]
+    assert len(ice) >= 3, "expected several slippery cells, found %d" % len(ice)
+    interesting = 0
+    for row, col in ice:
+        for pair in (((-1, 0), (1, 0)), ((0, -1), (0, 1))):
+            tiles = [grid[row + dr][col + dc] for dr, dc in pair]
+            # One side open and one side solid: a slip actually decides
+            # something rather than always bumping stone.
+            if len({t == "#" for t in tiles}) == 2:
+                interesting += 1
+                break
+    assert interesting >= 3, (
+        "only %d of %d slippery cells have a slip that matters"
+        % (interesting, len(ice)))
 
 
 def test_the_collapsing_tile_kind_is_unchanged():
