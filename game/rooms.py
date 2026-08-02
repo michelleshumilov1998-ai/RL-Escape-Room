@@ -275,6 +275,21 @@ ROOM2 = {
 
     "metric": {"key": "meanReward", "label": "Mean reward", "format": "%.1f"},
 
+    # DECOR IS SCENERY. IT IS NOT PART OF THE ROOM.
+    #
+    # Read only by `definition.py`, which turns it into entities for the
+    # renderer. `GridWorld` never sees this key: the cells below stay ordinary
+    # floor, with the same transitions, the same -1 step and the same place in
+    # the state space they always had.
+    #
+    # What it buys is the middle of the sector looking like the sealed
+    # maintenance void the briefing describes, rather than like a flat black
+    # rectangle. Rows 3-7, columns 3-6 — the pocket enclosed by the walls of
+    # r2 and columns 2 and 7, open only downwards onto the planks.
+    "decor": [
+        {"type": "void", "rows": (3, 7), "cols": (3, 6)},
+    ],
+
     # Rooms 2 and 3 support running several methods against the same grid and
     # the same seed, and drawing both learned routes at once.
     "comparison": True,

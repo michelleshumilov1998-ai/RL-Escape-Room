@@ -270,6 +270,37 @@ def build(room, env, parameters):
 
             entities.append(entity)
 
+    # SCENERY, DRAWN UNDER EVERYTHING ELSE.
+    #
+    # `room["decor"]` is a list of rectangles a room wants dressed. It says
+    # nothing about the environment — these cells keep whatever tile they
+    # already had, and `GridWorld` has never heard of this key — so it can add
+    # nothing to the state space and change nothing about a step.
+    #
+    # Room 2 uses it for the sealed maintenance void in its middle. The rims
+    # are worked out the same way the pit's are, so a block of cells reads as
+    # one continuous space with one edge rather than as a grid of holes.
+    for patch in room.get("decor", []):
+        first_row, last_row = patch["rows"]
+        first_col, last_col = patch["cols"]
+        for row in range(first_row, last_row + 1):
+            for col in range(first_col, last_col + 1):
+                if not (0 <= row < rows and 0 <= col < cols):
+                    continue
+                kinds_used.add(patch["type"])
+                entities.append({
+                    "id": "decor-r%dc%d" % (row, col),
+                    "type": patch["type"],
+                    "position": {"x": col + 0.5, "y": row + 0.5},
+                    "size": {"width": cell, "height": cell},
+                    "appearance": {"rims": {
+                        "top": row == first_row,
+                        "bottom": row == last_row,
+                        "left": col == first_col,
+                        "right": col == last_col,
+                    }},
+                })
+
     # Things that are not tiles at all. A patrolling guard has no square of
     # the map to belong to: it is declared once, wherever its patrol starts,
     # and given a new position by every step of a recorded episode.

@@ -52,9 +52,9 @@
        color       a CSS custom property name, e.g. '--cell-wall'.  The
                    colour itself lives in the stylesheet, never here.
        shape       which drawing recipe the renderer should use: 'wall',
-                   'ice', 'abyss', 'bridge', 'bridgeBroken', 'laser',
-                   'exit', 'start', 'obstacle', 'pad', or 'block' for a
-                   plain filled cell.  A thing on the grid is meant to
+                   'ice', 'abyss', 'maintenanceVoid', 'bridge',
+                   'bridgeBroken', 'laser', 'exit', 'start', 'obstacle',
+                   'pad', or 'block' for a plain filled cell.  A thing on the grid is meant to
                    look like what it is rather than like a coloured
                    square, and this is how a room says which it is.  The
                    renderer knows how to draw an abyss; which entities

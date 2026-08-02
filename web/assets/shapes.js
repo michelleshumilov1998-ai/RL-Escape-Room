@@ -745,6 +745,85 @@ window.Shapes = (function () {
      * The void is drawn first, at full depth, because a bridge only reads as a
      * bridge if you can see what is under it.
      */
+    /**
+     * A deep maintenance void, seen through a steel floor grating.
+     *
+     * WHY IT IS NOT SIMPLY DRAWN AS A SHAFT
+     * This is the sealed pocket in the middle of room 2. To the environment
+     * it is ordinary floor: a step up off a plank lands on it, costs -1 and
+     * leads nowhere. Drawing it as an open shaft would tell the player it is
+     * fatal, which is exactly the false claim the room's briefing was
+     * corrected for. So the depth is real and drawn in full — the lining,
+     * pipes, cross beams, machinery and fog of the shaft recipe — and a
+     * walkable grating is laid over the top of it. Depth you can stand on,
+     * which is what a maintenance void is.
+     *
+     * It carries `rims` like the pit does, so a block of these reads as one
+     * continuous space with one edge instead of a grid of separate holes.
+     */
+    maintenanceVoid(ctx, box, look, unit, palette) {
+      // 1. The void underneath, at full depth. Muted rather than hazard
+      //    coloured: nothing here ends a run, so nothing here is red.
+      RECIPES.abyss(ctx, box, { color: palette.hairlineFaint,
+                                rims: look.rims,
+                                phase: look.phase || 0 }, unit, palette);
+
+      // 2. The grating over it. Bars one way, thinner ties the other, with
+      //    the drop showing through the gaps — which is what makes it read
+      //    as a floor with something a long way below it.
+      if (unit >= 10) {
+        ctx.save();
+        // Three bars a cell, not five: the shaft below already has pipes
+        // running down it, and a dense grating on top of them turned the
+        // whole pocket into a stripe field with no depth left to see.
+        const bar = Math.max(0.6, unit * 0.026);
+        const pitch = box.width / 3;
+        ctx.fillStyle = palette.cellWall || palette.muted;
+
+        ctx.globalAlpha = 0.4;
+        for (let index = 0; index <= 3; index += 1) {
+          ctx.fillRect(box.left + index * pitch - bar / 2, box.top,
+                       bar, box.height);
+        }
+        // The cross ties are lighter and sparser, so the grating has a
+        // direction rather than reading as a net.
+        ctx.globalAlpha = 0.22;
+        const ties = box.height / 2;
+        for (let index = 0; index <= 2; index += 1) {
+          ctx.fillRect(box.left, box.top + index * ties - bar * 0.35,
+                       box.width, bar * 0.7);
+        }
+        // A highlight along the top of each bar: light catching worn steel.
+        ctx.globalAlpha = 0.12;
+        ctx.fillStyle = '#FFFFFF';
+        for (let index = 0; index <= 3; index += 1) {
+          ctx.fillRect(box.left + index * pitch - bar / 2, box.top,
+                       Math.max(0.4, bar * 0.4), box.height);
+        }
+        ctx.restore();
+      }
+
+      // 3. The frame around the opening, on the sides that are its edge.
+      const rims = look.rims || {};
+      if (unit >= 12) {
+        ctx.save();
+        ctx.globalAlpha = 0.8;
+        ctx.fillStyle = palette.cellWall || palette.muted;
+        const kerb = Math.max(1, unit * 0.06);
+        if (rims.top) ctx.fillRect(box.left, box.top, box.width, kerb);
+        if (rims.bottom) {
+          ctx.fillRect(box.left, box.top + box.height - kerb,
+                       box.width, kerb);
+        }
+        if (rims.left) ctx.fillRect(box.left, box.top, kerb, box.height);
+        if (rims.right) {
+          ctx.fillRect(box.left + box.width - kerb, box.top, kerb,
+                       box.height);
+        }
+        ctx.restore();
+      }
+    },
+
     bridge(ctx, box, look, unit, palette) {
       RECIPES.abyss(ctx, box, { color: palette.hairlineFaint,
                                 rims: look.rims }, unit, palette);

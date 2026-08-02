@@ -327,6 +327,57 @@ def test_no_other_room_reports_a_collapse_row_in_its_readout():
         assert not any("collapse" in label.lower() for label in rows)
 
 
+# ----------------------------------------------------------------------
+# 13. The maintenance void is scenery, and must stay scenery
+# ----------------------------------------------------------------------
+
+def test_the_void_is_decor_and_not_a_tile():
+    """`decor` dresses the screen. It must not reach the environment."""
+    room = rooms.room(ROOM)
+    assert room["decor"], "room 2 lost its maintenance void"
+    # Not a tile: the grid is untouched by it.
+    for line in room["grid"]:
+        assert "V" not in line and "v" not in line
+    # GridWorld has never heard of it.
+    env = world(0.1)
+    assert not hasattr(env, "decor")
+
+
+def test_the_void_changes_no_transition_anywhere():
+    """The proof that the scenery is scenery: the MDP is bit-identical.
+
+    Built once with the decor present and once with it stripped out, and
+    every (state, action) compared. If a decorative rectangle ever starts
+    changing a step, this is what says so.
+    """
+    plain = dict(rooms.room(ROOM))
+    plain.pop("decor", None)
+    with_decor = GridWorld(rooms.room(ROOM), slip=0.2, collapse=0.3)
+    without = GridWorld(plain, slip=0.2, collapse=0.3)
+
+    assert list(with_decor.all_states()) == list(without.all_states())
+    for state in with_decor.all_states():
+        assert with_decor.is_terminal(state) == without.is_terminal(state)
+        for action in with_decor.actions():
+            assert (with_decor.transitions(state, action)
+                    == without.transitions(state, action))
+
+
+def test_the_void_is_drawn_but_only_in_room_two():
+    session = Session(ROOM)
+    described = session.describe()["definition"]
+    kinds = {entity["type"] for entity in described["entities"]}
+    assert "void" in kinds, "the maintenance void is not being drawn"
+    # 5 rows by 4 columns of it.
+    assert sum(1 for e in described["entities"] if e["type"] == "void") == 20
+    for number in rooms.ROOM_NUMBERS:
+        if number == ROOM:
+            continue
+        other = Session(number).describe()["definition"]
+        assert not any(e["type"] == "void" for e in other["entities"]), (
+            "room %d gained scenery it never asked for" % number)
+
+
 def test_the_collapsing_tile_kind_is_unchanged():
     assert TILE_KINDS[COLLAPSING] == "collapsing"
     assert algorithms.describe_all(["sarsa"])[0]["label"] == "SARSA"

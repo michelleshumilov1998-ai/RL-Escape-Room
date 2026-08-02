@@ -110,6 +110,26 @@ ENTITIES = {
         "label": "Shaft", "colour": "--hazard", "shape": "abyss",
         "in_legend": True, "role": "hazard",
     },
+    # PURELY DECORATIVE, AND NOT A TILE AT ALL.
+    #
+    # Room 2's middle is walled off on three sides and open only downwards
+    # onto the planks: to the environment it is ordinary floor, and a step up
+    # off a plank lands on it, costs -1 and leads nowhere. It rendered as a
+    # flat black hole in the room, which was the weakest thing on the screen
+    # and said nothing about what the space is.
+    #
+    # This draws it as what the fiction says it is: a deep maintenance void
+    # with the machinery visible a long way down — SEEN THROUGH A STEEL
+    # GRATING, so it reads as depth without ever suggesting the agent would
+    # fall through it. That distinction is the whole reason it is not simply
+    # drawn as the `pit` above: a pit ends the run and this does not.
+    #
+    # It reaches the screen through `room["decor"]`, which only
+    # `definition.py` reads. No tile, transition, reward or state is involved.
+    "void": {
+        "label": "Maintenance void", "colour": "--cell-wall",
+        "shape": "maintenanceVoid", "in_legend": True, "role": "static",
+    },
     # A sound span over the shaft. Behaves exactly like floor; it is a tile of
     # its own only so it can be drawn as a bridge rather than as ground.
     "bridge": {
