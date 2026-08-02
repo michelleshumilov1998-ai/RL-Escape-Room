@@ -1,186 +1,115 @@
-# PROJECT R-5 — Escape from the Learning Lab
+# Project R-5 — A Reinforcement Learning Escape Room
 
-A reinforcement learning teaching project built as an escape game. R-5, an
-experimental navigation robot, wakes up on sub-level 4 of a sealed research
-institute and has to cross a series of test chambers to reach the surface. Each
-chamber is solved with a different method, so the same story is used to compare
-how those methods behave.
+An interactive escape room in which every door is opened by a different
+reinforcement learning method. Nothing in the game is scripted: in each of the
+five chambers the agent begins knowing nothing, and the player watches it work
+the room out.
 
 No reinforcement learning library is used anywhere. Every algorithm is written
 out by hand so the update rules can be read directly in the source.
 
 ---
 
-## Three chambers, three methods
+## Project overview
 
-| Room | Chamber | Method | The point of it |
-|---|---|---|---|
-| 1 | Laser Security Chamber | Value Iteration and Policy Iteration | planning when the model is *known* |
-| 2 | Broken Bridge Sector | SARSA, Expected SARSA, Q-Learning, Double Q-Learning | learning on-policy when it is not |
-| 3 | Reactor Control Chamber | Q-Learning and the three above | a reward a very long way from the first move towards it |
-| 4 | Drone Wind Tunnel | Semi-gradient SARSA and Q-Learning with tile coding, and a discretised table for contrast | the state is four real numbers, so there is no table to keep |
+### The story
 
-Room 5 — a procedurally generated warehouse solved with local features — **does
-not exist in this repository.** It was only ever implemented in an earlier
-Streamlit version of this project, which has been deleted; see *Known gaps*.
+At 02:14 AM an experimental reinforcement learning robot, **R-5**, becomes
+self-aware inside an AI research laboratory. The security system notices and
+seals the building. Five laboratory sectors stand between R-5 and the outside,
+and the only way through any of them is to learn.
 
-The first three chambers are 10 × 10 grids. The fourth is not a grid at all,
-which is the whole reason it is there: rooms 1 to 3 have finitely many states
-and a row per state is a perfectly good way to hold what has been learned, and
-room 4 is the case where that stops working.
+The chambers are not variations on one puzzle. Each was built to make a
+different learning problem unavoidable — a known model, learning from risk,
+learning from delay, learning without a table, and learning something that
+transfers to a room the agent has never seen.
 
-## Running it
+### Educational goal
 
-Nothing to install:
+The project demonstrates, in one application, the progression from classical
+Dynamic Programming to function approximation:
 
-```bash
-python3 serve.py
-```
+| Concept | Where it is demonstrated |
+|---|---|
+| Planning with a known model | Room 1 |
+| Model-free control, on-policy | Room 2 |
+| Model-free control, off-policy, delayed reward | Room 3 |
+| Linear function approximation over a continuous state | Room 4 |
+| Generalisation to unseen environments under partial observability | Room 5 |
 
-Then open <http://localhost:8000>. Start screen → chamber select → Enter.
+Every claim the interface makes about an algorithm is backed by something the
+player can move: sliders change the learning problem, graphs redraw from the
+run that actually happened, and any recorded episode can be replayed frame by
+frame.
 
-`serve.py` uses the standard library alone and the browser half is hand-written
-JavaScript with no build step, so there is no dependency to manage. `pytest` is
-the only entry in `requirements.txt`, and only for the tests.
+### Technologies used
 
-## How it is put together
+| Layer | Technology |
+|---|---|
+| Environments, algorithms, training | **Python 3**, standard library only |
+| Web server | `http.server.ThreadingHTTPServer` (`serve.py`) |
+| Frontend | Hand-written **HTML, CSS and JavaScript**; all rendering on `<canvas>` |
+| Tests | **pytest** |
 
-The simulation lives entirely in Python, in `game/`. The browser owns rendering
-and controls and never sees an environment, a policy or a value table — only
-snapshots. That boundary is the reason every claim in this file could be
-measured without opening a browser: `game/` is plain Python with no display
-dependency, so it can be driven from a script.
+There are **no third-party runtime dependencies**. `requirements.txt` contains
+`pytest` and nothing else, and it is needed only to run the test suite. There
+is no build step and no bundler.
 
-Two directories and two files, and that is the whole project.
-
-```
-serve.py                    the whole backend: hands out web/, holds sessions
-game/
-  config.py                 every tunable value, served to the browser as JSON
-  grid.py                   one GridWorld for every grid room: tiles, dynamics
-  reactor.py                room 3's world — a guard, doors on a cycle, keys
-  session.py               one run: the state machine, batching, metrics
-  comparison.py             several methods on one room, for the graphs
-  recorder.py               whole episodes kept, so a run can be replayed
-  definition.py             a room in the shape the browser's contract wants
-  algorithms/
-    base.py                 the interface, and the planners' shared parts
-    value_iteration.py  policy_iteration.py
-    tabular.py              the Q-table, ε-greedy, and what the four share
-    sarsa.py  expected_sarsa.py  q_learning.py  double_q_learning.py
-web/
-  index.html                start screen
-  levels/                   chamber select
-  level/                    room 1's screen — a planner, measured in sweeps
-  room/                     rooms 2 and 3 — learners, measured in episodes
-  assets/
-    sim.js                  the API client: the whole page/simulation boundary
-    shapes.js               every drawing recipe, shared by both screens
-    room/contract.js        the data contract, and the authority on it
-    room/producer.js        turns the API into that contract
-    room/shell.js           the room screen: DOM, the live loop, the panels
-    room/playback.js        walking a recorded batch, for replays
-    room/charts.js          the training graphs
-    room/compare.js         several methods on one set of axes
-```
-
-Six ideas the code is organised around, each of which is load-bearing rather
-than decorative:
-
-**One config, served.** `game/config.py` is handed to the browser verbatim at
-`/api/config`, so a speed tier or a parameter range is written down exactly once
-and the two halves cannot disagree. Colours are the deliberate exception: they
-live in `web/assets/base.css` as custom properties, and the config only names
-which property an entity uses. Nothing writes a hex value twice.
-
-**One abstraction over both families.** "One unit of learning" is a sweep for a
-planner and a single environment step for a learner (`session.py`). The state
-machine, the batching and the time budget above it never branch on which.
-
-**Turbo is time-budgeted, not counted.** 12 ms of simulation per request, so
-thousands of episodes are reachable without the interface ever blocking.
-
-**Parameters have scope.** A `live` parameter applies at once; a `reset` one
-marks the run *stale* rather than quietly changing the model under a value
-table that was computed against the old one.
-
-**Training is watched, not hidden.** Pressing Play advances the run a slice at a
-time and draws the world that comes back, so the agent is seen learning. The
-recorded episodes are a separate thing, for looking back at afterwards.
-
-**Recording is passive.** The recorder is handed transitions the agent was
-taking anyway and draws no randomness, so a run trains identically with
-recording on or off. Verified by comparing Q-tables.
-
-### The state, and why it is five numbers
-
-`GridWorld`'s state is `(row, col, battery, last_direction, collapsed)`. A cell
-alone is not a Markov state in these rooms:
-
-* A **battery** can only be collected once, so whether it is already in hand
-  changes what entering its cell is worth. Without it the model says the battery
-  pays out every time it is stepped on, and the best plan is to stand there
-  collecting it forever.
-* **Oil** carries the agent on in the direction it was already going, so what
-  happens next depends on what happened last.
-* A **collapsing plank** is a bridge early in an episode and a hole later.
-  Without knowing which have gone, the value of stepping onto one is an average
-  of "fine" and "fatal" — and an average is not a fact about the state.
-
-Each dimension collapses to a single value in a room that does not contain the
-thing, so a room pays only for what it has. Room 3 adds two more of its own; see
-its section.
-
-### The tile alphabet
-
-Shared by every grid room, in `game/grid.py`. Room 3 adds to it.
-
-| Char | Tile | Char | Tile |
-|---|---|---|---|
-| `S` | start | `L` | laser beam — back to the start, run continues |
-| `E` | exit | `H` | shaft — **ends the run** |
-| `#` | wall | `B` | battery |
-| `.` | floor | `T` | teleporter pad |
-| `~` | ice | `=` | cracked ice (2 × slip) |
-| `o` | oil (lowercase) | `D` | one-way door, down only |
-| `G` | sound bridge | `C` | collapsing plank |
-| `1` `2` `3` | generators | `a` `b` `c` | their keys — `a` starts `1` |
-| `d` | sliding door, on a cycle | `R` | reactor door |
-
-One trap worth naming: `_find` requires at least one `S` and one `E` but
-silently takes the **first** of any duplicates, so a stray second exit is not an
-error — it is simply ignored, and every `E` still ends a run.
-
-If you are pasting in a map from anywhere older than this file, note that an
-earlier version of the project used a different alphabet — `%` for hard ice,
-capital `O` for oil, `>` `<` `^` `v` for one-way doors and `G` for the goal.
-Those characters are not valid here: an unknown one raises `KeyError`, and a
-goal written as `G` gives `ValueError: the layout has no 'E' tile`.
-
-### Comparing methods
-
-Every chamber's sidebar has a **Compare methods** panel. It runs each method the
-room offers against the same layout, the same parameters and the same seed —
-one `Session` each, advanced together — and draws their curves on shared axes
-(`game/comparison.py`, `web/assets/room/compare.js`).
-
-Each curve carries its own x values, which matters more than it sounds. One call
-of Value Iteration is one sweep; one call of Policy Iteration is a whole policy
-evaluation — a couple of hundred sweeps — followed by an improvement. Plotting
-both against point index would put 15 sweeps and 389 sweeps on the same tick and
-imply they were the same amount of effort.
+> **A note on Streamlit.** This project does **not** use Streamlit. The user
+> interface is a custom single-page application served by a standard-library
+> HTTP server, because the game requires frame-accurate canvas animation,
+> episode replay and a persistent training loop that Streamlit's script re-run
+> model does not provide. An early prototype of this project did use Streamlit;
+> it was replaced, and this README documents the implementation as it exists.
 
 ---
 
-# Room 1 — The Laser Security Chamber
+## Game flow
 
-*Lab sector A-01 · Security protocol active · Dynamic Programming*
+1. **Opening briefing.** Four player-paced slides introduce the premise. The
+   player advances with `NEXT`, `SPACE`, `ENTER` or a click; nothing advances on
+   a timer, and `SKIP` or `ESC` ends it at once. Behind the text, a robot
+   repeatedly fails at a hazard and gets one hazard further each attempt — the
+   premise, animated.
+2. **Main menu.** `PLAY` and `ABOUT`.
+3. **Chamber select.** A new player starts at chamber 1 with chambers 2–5
+   locked. Progress is a single stored integer: clearing chamber *N* unlocks
+   *N + 1*, and progress can never go backwards.
+4. **A chamber.** The player sets hyperparameters, presses `TRAIN`, and watches
+   the agent learn. Graphs fill in as the run proceeds; recorded episodes
+   appear in the replay browser.
+5. **Mission Complete.** Shown only after the agent has been *watched* reaching
+   the exit — never during training. The chamber is then marked cleared, and
+   the next one unlocks on leaving.
+6. **Rooms 2 → 5** in the same way, each with a different method.
+7. **Final victory screen.** After Room 5, a dedicated ending sequence with a
+   training summary and four choices: *Replay Final Escape*, *View Training
+   Results*, *Play Again*, *Main Menu*.
 
-The room whose model is **known**. Every rule below is in the model before the
-agent has moved, which is what lets Dynamic Programming route around a beam it
-has never touched. Nothing is learned from experience here.
+---
 
-## The map
+## Reinforcement Learning algorithms
+
+| Room | Algorithm (default) | Environment type | State representation | Action space | Reward objective |
+|---|---|---|---|---|---|
+| **1** Laser Security Chamber | Value Iteration | 10×10 grid, **known model**, stochastic surfaces | `(row, col, battery, last_direction, collapsed)` | 4 — up, down, left, right | Reach the control panel; avoid beams; battery bonus |
+| **2** Broken Bridge Sector | SARSA | 10×10 grid, model-free, stochastic | `(row, col, battery, last_direction, collapsed)` | 4 — up, down, left, right | Cross to the exit; the span is fast but can give way |
+| **3** Reactor Control Chamber | Q-Learning | 10×10 grid, model-free, delayed reward | 8-tuple: cell, keys held, generators started, patrol phase | 5 — four moves **plus WAIT** | Three keys, three generators **in order**, then the door |
+| **4** Drone Wind Tunnel | Semi-gradient SARSA | Continuous 10 × 10 m, `dt = 0.02 s` | `(x, y, vx, vy)` — metres and m/s | 5 — four thrust directions plus hold | Land on the pad **below the landing speed** |
+| **5** Adaptive Storage Facility | Semi-gradient Q-Learning | Continuous 10 × 10 m, **procedurally generated**, partially observable | `(x, y, vx, vy, stage, phase)` | 5 — four thrust directions plus hold | Reach the terminal, then escape through the blast door |
+
+Each room also offers alternative methods for contrast. A comparison runs on
+the server against the same layout, the same parameters and the same seed, so a
+difference between two curves is a difference between two methods.
+
+---
+
+## Room 1 — Dynamic Programming
+
+### Environment
+
+A 10×10 security wing. This is the **only room whose model is known in
+advance**, which is what makes planning possible rather than learning.
 
 ```
       c0 c1 c2 c3 c4 c5 c6 c7 c8 c9
@@ -190,141 +119,97 @@ r2     .  ~  .  T  .  .  .  #  .  .
 r3     .  L  .  L  L  .  .  #  .  .
 r4     .  .  .  #  .  .  o  .  .  .
 r5     #  #  .  L  #  #  #  .  .  .
-r6     .  .  T  .  .  =  .  .  .  .
+r6     .  .  T  ~  ~  =  .  .  .  .
 r7     .  #  #  #  .  D  .  #  #  .
-r8     .  .  .  o  .  .  .  .  .  .
-r9     .  .  .  .  #  E  .  .  .  .
+r8     .  .  .  o  ~  ~  .  .  .  .
+r9     .  .  .  .  #  E  ~  .  .  .
 ```
 
-Start `(0,0)`, control panel `(9,5)`, battery `(0,6)`, teleport pads `(2,3)` and
-`(6,2)`, one-way door `(7,5)`.
+`S` start · `E` control panel · `L` laser · `~` ice · `=` cracked ice ·
+`o` oil · `T` teleport pad · `B` battery · `D` one-way door · `#` wall
 
-**Column 3 seals the upper chamber in two.** Down to row 5 it is `#`, `#`, `T`,
-`L`, `#`, `L` — walls, a pad and beams — so the pad at `(2,3)` is the only
-opening between the two halves.
+### The known model
 
-What "without the teleporter" is worth depends on what the pads become, and an
-earlier version of this file got it wrong by not saying. Measured, three ways:
+`GridWorld.transitions(state, action)` returns the full distribution over
+successor states — every outcome with its probability and reward. The planner
+reads that distribution directly and never samples a step, which is why R-5 can
+route around a laser it has never touched.
 
-| The pads are… | Shortest route |
-|---|---|
-| teleporting, as they are | **11 steps** |
-| ordinary floor | 14 steps — down column 2 through `(5,2)` and `(6,2)`, no teleporting needed |
-| impassable | **none at all** |
+### State
 
-The old claim of "no route at all without the teleporter" is only the third
-row. Leaving the pads as plain floor still leaves a way through, because
-column 2 is open from row 4 to row 6. Pinned in
-`tests/test_game_room1.py::test_the_pads_are_the_only_gap_in_the_beam_wall`.
+`(row, col, battery, last_direction, collapsed)`. A cell alone is not Markov
+here: the battery can only be collected once, so whether it is already in hand
+changes what entering its cell is worth; and oil carries the agent onward in
+the direction it was already travelling, so the previous direction must be part
+of the state.
 
-## The state and the actions
+### Actions
 
-`(row, col, battery, last_direction, collapsed)` — 810 states, of which the
-collapsed dimension is one value because there are no planks here. Four actions:
-up, down, left, right. The action is what the agent *tries*; the floor it is
-standing on decides what happens.
+Four: up, down, left, right.
 
-## The rewards
+### Rewards
 
-| Event | Reward |
+| Event | Value |
 |---|---|
 | Each step | −1 |
-| Walking into a wall | −1 + (−3) = −4 |
-| Walking into a beam | −1 + (−30) = −31, **and back to the start** |
-| Collecting the battery | −1 + the battery bonus (a slider) |
-| Taking a teleport pad | −1, like any other step |
-| Reaching the panel | −1 + 100 = **+99** |
+| Walking into a wall | −3 |
+| Touching a laser | −30 (returns the agent to the start; the episode continues) |
+| Collecting the battery | +10 (adjustable) |
+| Reaching the control panel | +100 |
 
-A laser is **not fatal**: it throws the agent back to the door it came in by,
-which costs it everything it had walked. That is harder to plan around than
-simply dying, and it means a laser is effectively a *wall* — no optimal plan
-ever steps into one on purpose. Genuine probabilistic risk exists only where a
-loose surface sits next to a beam, so a sideways slip can push R-5 into a beam
-it never aimed at.
+### Slippery cells and teleport
 
-**The pad pays nothing, and that is a fix rather than an oversight.** It used to
-pay +5 on entry. Because a pad is entered unconditionally and both pads lead to
-each other, that made a cycle the agent could ride: two steps apart via `(5,2)`,
-netting +6 every four steps. Above about γ 0.98 riding it beat leaving — the
-plan shuttled between the pads **198 times in 400 steps and never reached the
-panel**, and V(start) ballooned to 1491 at γ 0.999. Setting the pad's reward to
-zero removes it completely; the reward for a shortcut is the steps it saves.
+* **Ice** (`~`) — goes where it aimed with probability `1 − slip`, otherwise
+  slides to one of the two perpendicular sides.
+* **Cracked ice** (`=`) — the same, at twice the slip.
+* **Oil** (`o`) — no grip: with probability `slip` it continues in the
+  direction it was already moving, whatever it aimed for.
+* **Teleport pads** (`T`) — a linked pair that skips the beam wall entirely.
+* **One-way door** (`D`) — may only be entered downwards; the choice cannot be
+  undone.
 
-| γ | Before (pad +5) | After (pad 0) |
+### Why Dynamic Programming fits
+
+The transition model is available in closed form, so the optimal policy can be
+**computed** rather than estimated from experience. Value Iteration sweeps the
+whole state space and reads the plan straight out of the model. This is the
+only room where that is possible, and it is the baseline the other four are
+measured against. **Policy Iteration** is offered alongside for comparison.
+
+### Hyperparameters
+
+| Parameter | Range | Default |
 |---|---|---|
-| 0.90 | 11 steps, exit | 11 steps, exit |
-| 0.95 | 11 steps, exit | 11 steps, exit |
-| **0.99** | **400 steps, lost, 198 pad uses** | 11 steps, exit |
-| **0.999** | **400 steps, lost, 2744 sweeps** | 11 steps, exit, 16 sweeps |
+| Discount factor γ | 0.5 – 0.999 | 0.95 |
+| Stopping threshold θ | 1e−6 – 0.1 | 1e−4 |
+| Ice slipperiness | 0.0 – 0.5 | 0.20 |
+| Battery bonus | 0 – 80 | 10 |
 
-## The parameters
+### Graphs shown
 
-| Parameter | Range | Default | Scope |
-|---|---|---|---|
-| γ discount factor | 0.50 – 0.999 | 0.95 | reset |
-| θ stopping threshold | 1e−6 – 1e−1 | 1e−4 | live |
-| Ice slipperiness | 0.0 – 0.5 | 0.20 | reset |
-| Battery bonus | 0 – 80 | 10 | reset |
+One graph, because a planner produces one measurable quantity per sweep:
 
-## The measured result
+* **Largest value change per sweep** — logarithmic axis, with the stopping
+  threshold θ drawn as a dashed line that follows its slider. This is exactly
+  the quantity the stopping rule tests.
 
-At the defaults, both methods converge to the same plan: **11 steps, +89**, via
-`(0,0) → (0,1) → (0,2) → (1,2) → (2,2) →` pad `→ (6,2) → (6,3) → (6,4) → (7,4)
-→ (8,4) → (8,5) → (9,5)`. V(start) = 51.25.
+The status strip reports sweeps, largest change, threshold, V(start) and
+whether the run has converged.
 
-**Value Iteration takes 15 sweeps. Policy Iteration takes 389.** Same plan, 26×
-the work — which is the comparison this room exists to show, and it is what the
-Compare panel draws.
+### Replay support
 
-The **battery bonus** changes the plan:
-
-| Bonus | Steps | Reward | Fetches the battery? |
-|---|---|---|---|
-| 0 – 40 | 11 | +89 | no |
-| 60 | 23 | +137 | **yes** |
-| 80 | 23 | +157 | **yes** |
-
-### Two things this room does not currently show
-
-Both are consequences of the map as it stands, and both are measured rather
-than suspected.
-
-**The slipperiness slider cannot change what the route is worth.** V(start) is
-51.2497 at slip 0.00, 0.10, 0.20, 0.35 and 0.50, and the route is 11 steps for
-+89 at every one. The optimal path is entirely firm floor, so no slip can ever
-occur — the ice, the oil and the cracked ice are decoration the plan routes
-around. Making `(6,3)` and `(6,4)` ice would fix it in one edit: the path
-already crosses them and the beam at `(5,3)` is directly above `(6,3)`.
-
-It is not quite inert, though, and this file previously said it was. There are
-**two** 11-step routes out of the start and they are worth exactly the same
-while the ice is frictionless. One of them crosses the `~` at `(2,1)`, which
-sits directly above the laser at `(3,1)`:
-
-| slip | first four cells | over the ice at `(2,1)`? |
-|---|---|---|
-| 0.00 | `(0,0) (1,0) (2,0) (2,1)` | **yes** |
-| 0.10 – 0.50 | `(0,0) (0,1) (0,2) (1,2)` | no |
-
-So the slider does decide which of the two equal routes is taken — the moment
-the ice is slippery at all, the plan stops walking over the one cell where a
-sideways slip would put it in a beam. V(start) never moves, because the
-alternative is the same length. That is a narrower failing than "does nothing",
-and both halves are pinned in `tests/test_game_room1.py`.
-
-**There is no route choice, and the one-way door is decorative.** The teleporter
-is mandatory, so there is nothing for the parameters to flip between. Blocking
-the door at `(7,5)` entirely leaves the shortest route at 11 steps.
+Value Iteration takes no steps while planning, so the live agent does not move.
+When the plan is complete the room records **one greedy walk** — the learned
+policy followed with exploration removed — which is listed in the replay
+browser and played by **Show final route**.
 
 ---
 
-# Room 2 — The Broken Bridge Sector
+## Room 2 — SARSA
 
-*Lab sector B-04 · Structural failure · SARSA, and three others for contrast*
+### The bridge environment
 
-The model is not given. The only way to find out what a step does is to take it.
-
-## The sector
+A 10×10 sector split by a lethal shaft, crossed by a single steel span.
 
 ```
       c0 c1 c2 c3 c4 c5 c6 c7 c8 c9
@@ -340,616 +225,609 @@ r8     #  S  #  H  H  H  H  #  E  #
 r9     #  #  #  #  #  #  #  #  #  #
 ```
 
-Two ways across, measured by breadth-first search:
+`H` shaft (entering it ends the run) · `G` sound deck · `C` collapsing plank ·
+`~` ice
 
-* **the span** — 9 steps. Two sound deck sections (`G`) with four planks (`C`)
-  between them, and shaft above *and* below every plank, so there is no
-  stepping sideways off it. Crossed cleanly it is worth **+29**.
-* **the way round** — 21 steps, up the west wall and down the east. Nothing on
-  it can drop the agent, but four cells of it are iced. Worth **+17**.
+Two routes, measured by breadth-first search:
 
-## What the collapse probability means
+* **The span** — 9 steps. Worth **+29** crossed cleanly.
+* **The way round** — 21 steps, up the west wall and down the east. Nothing on
+  it can drop the agent. Worth **+17**.
 
-**It is sampled once per crossing, not once per plank.** The draw happens on
-the single step that takes R-5 off solid ground and on to the planks; survive
-it and the whole span is made. So the number on the slider *is* the chance of
-losing a crossing:
+There is shaft **above and below every plank**, so stepping sideways off the
+span is impossible.
 
-```
-effective crossing risk = p          (not 1 - (1 - p)^4)
-```
+### The collapsing bridge
 
-This was the other way round and it made the control unreadable. Four planks
-each drawn independently meant the 0.10 default was really a 34% chance of
-dying, under a label that said 10%, and the learned policy had already given
-the span up by then — so the slider looked broken across its whole useful
-range.
-
-## The reward table, and why it was retuned
+**The collapse probability is sampled once per crossing, not once per plank.**
+The draw happens on the single step that takes R-5 off solid ground and on to
+the planks; survive it and the whole span is made. The number on the slider is
+therefore exactly the chance of losing a crossing:
 
 ```
-step -1        wall -2        fall -15        exit +38
+effective crossing risk = p          (not 1 − (1 − p)^4)
 ```
 
-The old table was `goal +100 / hazard -100`, and with it no 10x10 map can put
-the decision anywhere useful. A fall forfeits the exit as well as paying the
-penalty, so the bridge is worth taking only while
+### Slippery cells
+
+Four iced cells sit at the two corners of the safe route — before a turn, after
+a turn, and against a wall. Each has **one side open and one side solid**, so a
+slip costs progress or a wall bump rather than producing two identical
+outcomes.
+
+### Stochastic transitions
+
+Two independent sources of randomness, both exposed as sliders: the ice on the
+safe route, and the crossing draw on the span.
+
+### State
+
+`(row, col, battery, last_direction, collapsed)`. Which planks have already
+gone is part of the state, so the agent is never asked to average "fine" with
+"fatal".
+
+### Actions
+
+Four: up, down, left, right.
+
+### Rewards
+
+| Event | Value |
+|---|---|
+| Each step | −1 |
+| Walking into a wall | −2 |
+| Falling into the shaft, or through the span | −15 |
+| Reaching the exit | +38 |
+
+These magnitudes were chosen so the decision is live across the slider's useful
+range. A fall forfeits the exit *as well as* paying the penalty, so the span is
+worth taking only while
 
 ```
-crossing risk  <  (steps saved) / (exit + fall penalty + steps walked in)
+crossing risk  <  steps saved / (exit + fall penalty + steps walked in)
 ```
 
-With +100/-100 and 12 steps saved that is a threshold of about **3%** — the
-span is irrational almost immediately, whatever the map looks like. Bringing
-the exit and the fall down to +38 and -15 moves the same threshold to about
-**25%**, which is where a slider is worth having. Every constraint is kept: a
+At `+100 / −100` that threshold is about **3%** — the span is irrational almost
+immediately, whatever the map looks like. At `+38 / −15` it is about **25%**. A
 step still costs, the exit still pays, a fall is still fifteen times a step,
 and a faster escape still scores higher.
 
-Measured, five seeds each:
+### Measured behaviour
+
+Learned route, five random seeds per setting:
 
 | p | 0.00 | 0.05 | 0.10 | 0.20 | 0.30 | 0.40 | 0.60 |
 |---|---|---|---|---|---|---|---|
 | route | span | span | span | span | **mixed 2/5** | round | round |
 
-## The planks in the state
+### Hyperparameters
 
-A plank can give way **under the step that lands on it**, and that is a fall
-into the shaft. Survive it and the plank is gone behind you, so the span cannot
-be walked back — a step returning onto a gap is the same fall. The risk
-compounds: four planks at chance *p* get across with probability (1−p)⁴.
+| Parameter | Range | Default |
+|---|---|---|
+| Learning rate α | 0.01 – 1.0 | 0.10 |
+| Discount factor γ | 0.5 – 0.999 | 0.95 |
+| Exploration ε | 0.0 – 1.0 | 1.00 |
+| Minimum exploration | 0.0 – 0.5 | 0.05 |
+| Exploration decay | 0.9 – 1.0 | 0.995 |
+| Ice slipperiness | 0.0 – 0.5 | 0.20 |
+| Bridge collapse probability | 0.0 – 1.0 | 0.10 |
+| Initial Q value | 0 – 150 | 30 |
+| Episodes to train | 100 – 8000 | 1500 |
 
-The model exposes both stages, which is what Dynamic Programming would read and
-what the model-free methods here are deliberately not given:
+### Why SARSA is appropriate
 
-```
-stepping onto a sound plank      p=0.90 → cross,  −1
-                                 p=0.10 → fall,   −101, run ends
-stepping onto a gap              p=1.00 → fall,   −101, run ends
-stepping up into the shaft       p=1.00 → fall,   −101, run ends
-```
+The room is a risk-versus-return decision, and the two families answer it
+differently. **SARSA is on-policy**: it learns the value of the route it is
+actually walking, exploratory steps beside a lethal shaft included. Q-Learning
+learns the value of walking that route perfectly. SARSA therefore gives the
+span up earlier — the practical difference between the two families, visible on
+one map. Expected SARSA, Q-Learning and Double Q-Learning are offered for
+comparison.
 
-At the default 0.10, walking straight across 2000 times got out **66%** of the
-time — exactly 0.9⁴.
+### Graphs and replay
 
-## The state
-
-`(row, col, battery, last_direction, collapsed)`, **5,120 states**. The
-`collapsed` field is a bitmask, one bit per plank in map order, and it is what
-keeps the room Markovian. Without it, stepping toward the span would be worth an
-average of "fine" and "fatal".
-
-## The rewards
-
-| Event | Reward |
-|---|---|
-| Each step | −1 |
-| Walking into a wall | −1 + (−2) = −3 |
-| Falling into the shaft | −1 + (−100) = −101 |
-| A plank giving way underfoot | −1 + (−100) = −101 |
-| Reaching the exit | −1 + 100 = **+99** |
-
-## The parameters
-
-α, γ, ε, ε floor, ε decay, initial Q (default 90, optimistic), episodes
-(default 1500), and **plank failure chance** (0 – 0.5, default 0.10, reset
-scope). There is no slipperiness control: nothing in this sector is loose.
-
-## The measured result, and the problem with it
-
-All four methods train and reach the exit. At 1500 episodes they land within
-half a point of each other: SARSA 76.3, Expected SARSA 76.7, Q-Learning 76.8,
-Double Q 76.7 mean reward.
-
-**The textbook contrast does not appear on this map.** It was found in none of
-sixteen parameter combinations swept over γ, ε floor, initial Q and plank
-chance; where two methods differed, it was SARSA on the risky span and
-Q-Learning on the safe lap — the reverse of the classic result.
-
-The cause is geometric, not a matter of tuning:
-
-```
-span: 8 cells,  6 next to something fatal
-lap : 22 cells, 18 next to something fatal
-```
-
-**The "safe" route is the more dangerous one.** The shaft is a 6 × 6 block
-touching columns 1 and 8, so both vertical legs of the lap run directly
-alongside it and one random sideways step anywhere along them is a fall. The lap
-has three times the exposure and three times the length, so SARSA is *correctly*
-preferring the span. There is no setting that fixes that.
-
-A second finding is worth recording because it is easy to get wrong: **plank
-failure cannot separate SARSA from Q-Learning.** It is environment
-stochasticity, which both methods price identically — only exploration-induced
-risk separates on-policy from off-policy. At plank chance 0 both take the span;
-at 0.10 and above the plank risk swamps the +14 margin and both take the lap.
-
-The fix is two rows — wall the vertical corridors off from the shaft, so that
-nothing on the lap has a drop beside it:
-
-```
-r2     #  .  #  #  #  #  #  #  .  #
-r3-r7  #  .  #  H  H  H  H  #  .  #
-```
-
-That keeps the shaft directly above the four planks, so the span stays risky
-while the lap becomes genuinely safe. It has **not** been applied: the map is as
-specified.
+Reward per episode, steps per episode, exploration rate and convergence
+measure. Every recorded episode is listed and replayable frame by frame,
+including the collapse, which is drawn with the span shearing away.
 
 ---
 
-# Room 3 — The Reactor Control Chamber
+## Room 3 — Q-Learning
 
-*Lab sector C-07 · Power grid offline · Q-Learning*
+### Environment
 
-The chamber with things that move. Rooms 1 and 2 are static — a tile means the
-same thing on every step of every episode. Here a guard walks a patrol and the
-shaft doors open and shut on a cycle, so the same cell is safe at one moment and
-fatal at the next.
-
-## The chamber
+A service ring around a reactor core, with a shaft through the middle.
 
 ```
       c0 c1 c2 c3 c4 c5 c6 c7 c8 c9
 r0     #  #  #  #  #  #  #  #  #  #
-r1     #  S  .  b  .  .  .  1  #  #     key b, generator 1
-r2     #  .  #  #  d  #  #  .  #  #     the shaft's north door
+r1     #  S  .  b  .  .  .  1  #  #
+r2     #  .  #  #  d  #  #  .  #  #
 r3     #  .  #  #  .  #  #  .  #  #
-r4     #  .  #  #  c  #  #  .  #  #     key c, inside the shaft
+r4     #  .  #  #  c  #  #  .  #  #
 r5     #  .  #  #  .  #  #  .  #  #
-r6     #  .  #  #  d  #  #  .  #  #     the shaft's south door
-r7     #  3  .  a  .  .  .  2  #  #     generator 3, key a, generator 2
-r8     #  #  #  #  R  #  #  #  #  #     the reactor door
-r9     #  #  #  #  E  #  #  #  #  #     the exit, behind it
+r6     #  .  #  #  d  #  #  .  #  #
+r7     #  3  .  a  .  .  .  2  #  #
+r8     #  #  #  #  R  #  #  #  #  #
+r9     #  #  #  #  E  #  #  #  #  #
 ```
 
-31 walkable cells. Start `(1,1)`, exit `(9,4)`.
+`a b c` keys · `1 2 3` generators · `d` sliding doors on a cycle ·
+`R` reactor blast door · `E` exit. A security robot patrols the ring.
 
-## The task: six errands, in order
+### Exploration and delayed rewards
 
-Three generators must be brought up **in sequence** — 1, then 2, then 3 — and
-each needs **its own key** fetched first. Each key is kept well away from the
-generator it belongs to, so every errand is a journey:
+The exit reward is roughly two dozen steps from the first move that leads
+towards it, with **six errands in a fixed order** in between and nothing paid
+out along the way. Carrying value that far backwards is the problem this room
+poses, and it is why exploration has to be sustained rather than decayed away
+quickly.
 
-| Key | Where | Starts | Where |
-|---|---|---|---|
-| `a` | `(7,3)` south run | `1` | `(1,7)` north-east |
-| `b` | `(1,3)` north run | `2` | `(7,7)` south-east |
-| `c` | `(4,4)` in the shaft | `3` | `(7,1)` south-west |
+### State
 
-Verified behaviour: on generator 1 with **no key**, nothing happens (−1, stage
-unchanged); with **key `a`**, it fires (+19, stage advances); with **key `b`**,
-nothing — a key works only on its own generator. Standing on generator 2 first
-while holding all three keys leaves the stage at 0.
+An 8-tuple: cell, which keys are held, how far through the generator sequence
+the reactor is, and where the patrol has reached. The sliding doors are derived
+from the patrol phase rather than a clock of their own, so a single number
+covers both moving things.
 
-A generator is drawn **white** while it is off and **green** once it is running,
-so how far through the sequence the reactor is can be read off the chamber
-itself. The reactor door bumps like a wall until all three are up:
+### Actions
 
-| Stage | Step onto the reactor door |
-|---|---|
-| 0, 1, 2 | blocked, −3 |
-| 3 | opens, −1 |
+**Five** — up, down, left, right, and **WAIT**. This is the only room with a
+wait action, because the shortcut's doors are open two steps in four and
+arriving early to hold position is a genuine tactic.
 
-The shortest complete mission is **37 steps**, ignoring door timing.
+### Rewards
 
-## What gets in the way
-
-* **The guard** walks the 24-cell service ring anticlockwise, one cell per step,
-  against the direction the errands run — so the two meet head-on once a lap.
-  Being caught ends the run. The check counts the **swap** as well as the
-  collision: two things stepping one cell towards each other would otherwise
-  pass straight through, and a guard you can walk through is not a guard.
-* **The doors** at both ends of the shaft are open two steps in every four.
-  The shaft is 8 steps to the north run against 12 round the ring, and the guard
-  never enters it, so it is both a shortcut and the one reliable refuge.
-* **Waiting** is an action here and nowhere else. A shut door opens again two
-  steps later, so holding is a real move rather than a wasted step.
-
-## The state
-
-`(row, col, battery, last_direction, collapsed, stage, guard, keys)` —
-**23,808 states**. Three fields inherited from the base grid are dead weight
-(no battery, no planks, nothing loose), but they cost one value each and keeping
-the layout identical means every algorithm, the cell projection and the renderer
-work unchanged. `last_direction` is *pinned* to "none" for that reason:
-enumerating it would multiply the table by six to describe something no rule in
-this room reads.
-
-The three that matter: **stage** (how far through the sequence), **guard**
-(patrol index), **keys** (a bitmask, one bit each). Keys cannot be folded into
-stage — the errands and the sequence advance independently.
-
-**The doors are derived from the guard, not from a clock.** A door on a timer
-would make the room non-Markovian: the same cell would mean different things at
-different moments with nothing in the state saying which. The patrol is 24 cells
-and the door cycle is 4, so the cycle divides in exactly, the pattern repeats,
-and one state dimension covers both moving things. `ReactorWorld` raises if a
-room ever breaks that divisibility.
-
-## The rewards
-
-| Event | Reward |
+| Event | Value |
 |---|---|
 | Each step | −1 |
-| Into a wall or a shut door | −1 + (−2) = −3 |
-| Picking up a key | −1 + 15 = **+14** |
-| A generator, in order and keyed | −1 + 20 = **+19** |
-| Being caught by the robot | −1 + (−100) = **−101** |
-| Leaving through the reactor door | −1 + 100 = **+99** |
+| Walking into a wall | −2 |
+| Collecting a key | +15 |
+| Starting a generator, in order | +20 |
+| Caught by the security robot | −100 |
+| Reaching the exit | +100 |
 
-## The parameters
+### Hyperparameters
 
-α, γ (default **0.99** — the reward is a long way from the first move towards
-it), ε, ε floor, ε decay, initial Q (0), episodes (default 4000).
-
-## The measured result
-
-Compared at the defaults, 4000 episodes each, same seed:
-
-| Method | Mean reward |
-|---|---|
-| Expected SARSA | **25.18** |
-| SARSA | **20.98** |
-| Q-Learning | −39.26 |
-| Double Q-Learning | −90.76 |
-
-The on-policy methods are ahead, which is the opposite of what room 2 sets out
-to show. That is plausible with a patrolling guard punishing optimism, but it
-has **not been investigated** and should not be presented as a finding.
-
-Two honest caveats. The 4000-episode default is a guess, not a measurement, and
-it is expensive: comparing all four methods takes **245 seconds** over 173
-requests. And whether any method converges to a reliable escape at that setting
-has not been established.
-
----
-
-# Room 4 — The Drone Wind Tunnel
-
-*Lab sector D-07 · Flight stabilisation test · Semi-gradient SARSA with tile
-coding*
-
-With the reactor back up, the ground corridor to the final sector has
-collapsed. R-5 couples itself to an experimental drone frame and lifts off into
-the aerospace bay. **This is the room where a table stops working.**
-
-## The chamber
-
-10 × 10 metres of continuous space — no grid, no cells, nothing to index.
-
-```
-  launch platform   (1.5, 8.2)     lower left
-  landing platform  (8.2, 1.6)     upper right, 1.6 x 0.9 m
-  turbine housings  (4.3, 5.5) r 0.95   and   (6.5, 3.5) r 0.80
-  airflow, upper    3.0 x 3.0 m centred (3.6, 2.6), blowing down at 1.4 m/s²
-  airflow, lower    3.6 x 1.6 m centred (7.6, 7.8), blowing down at 1.1 m/s²
-  stabilisation     2.4 x 2.0 m centred (7.6, 5.4), +3.0 drag
-  overcharge        1.6 x 2.4 m centred (2.4, 5.0), 2x thrust, -5 to enter
-```
-
-**The lower band exists because the upper one was not in the way.** The route
-the agent actually learns runs right along the floor and then climbs the east
-wall, which passes nowhere near `(3.6, 2.6)` — the chamber was solvable without
-ever meeting a fan, and it was too easy for it. The second band is wide and
-shallow and sits on the corner of that L, so the turn from the floor onto the
-climb is made into a downdraught. Measured: a hand-flown route now spends 308
-of its 907 steps inside it, and the mean flight in training rose from about
-1000 steps to 1143.
-
-Six ventilation fans stand at the mouths of the two bands, in a row across
-each. They apply no force at all — the bands do — and they are there so the
-force has a visible cause.
-`tests/test_game_room4.py::test_the_fans_are_decoration_and_apply_no_force`
-removes the fan generator and asserts 400 steps come out identical. It is
-written that way because the first version of that test compared a chamber
-against an identical copy of itself, and would have passed however
-load-bearing the fans were.
-
-## The state, and why it is only four numbers
-
-```
-state = (x, y, vx, vy)      metres, and metres per second
-dt = 0.02 s        |vx| ≤ 1        |vy| ≤ 1
-```
-
-Five actions: hold, and a thrust along each axis. A thrust is an
-*acceleration*, so what the agent does now is felt several steps later, and
-that delay is most of the difficulty. Integration is semi-implicit Euler — the
-velocity is updated first and carries the position — with drag applied as a
-decay over the tick, so no coefficient can ever push the drone backwards.
-
-**Everything in the chamber is static in time and interesting in space.** The
-forces depend on where the drone is and never on when it got there, which is
-what keeps four numbers a Markov state. An earlier sketch had a gate rising and
-falling on a cycle; it is not here, because the same four numbers would mean
-"clear" at one moment and "blocked" at the next with nothing in the state
-saying which. Room 3 can afford its sliding doors only because it derives them
-from the guard's patrol index, which *is* part of its state. Wind strength is a
-reset-scope parameter for the same reason: it can be studied across runs
-without ever being a hidden variable inside one.
-
-## The task is the landing, not the arrival
-
-Touching the platform is easy. Touching it with **both** velocity components
-under 0.30 m/s is the problem, and it is what stops the answer being "aim at
-the platform and hold full thrust". Arriving faster is a crash-landing at −30.
-
-Measured while setting the numbers: an action pushes along one axis, so only
-one axis can be decelerated per step, and a drone shedding speed on both
-alternates and brakes at half the rate. At 2.0 m/s² thrust against a 0.22 m/s
-limit the best hand-flown approach arrived at **0.242** — a near miss. A room
-whose task is very slightly out of reach is not a harder room, it is a broken
-one, so thrust is 3.0 and the limit is 0.30.
-
-## The rewards
-
-| Event | Reward |
-|---|---|
-| Each step | −0.01 |
-| Closing on the platform | +5 per metre closed |
-| Drifting away from it | −5 per metre lost |
-| Entering the overcharge | −5, once per visit |
-| A wall or a turbine housing | −100 |
-| Reaching the platform too fast | −30 |
-| Landing gently | **+200** |
-
-The shaping is a *difference* of distances, so the total over any round trip is
-zero. A term that paid for approach without charging for retreat would make
-orbiting the platform more profitable than landing on it — pinned by
-`test_progress_shaping_is_symmetric`.
-
-## The measured result
-
-Hand-flown reference routes land in **907 steps** at their quickest and 1237 at
-their most cautious; the trade between the two is the room, so the step limit
-is 1800 rather than deciding it in advance. Semi-gradient SARSA at the
-defaults, 1200 episodes, about 40 seconds on Turbo:
-
-| Episodes | Landings | Mean reward |
+| Parameter | Range | Default |
 |---|---|---|
-| 300 | 1% | +11.0 |
-| 600 | 83% | +190.5 |
-| 900 | 99% | +229.7 |
-| 1200 | **96%** | **+222.8** |
+| Learning rate α | 0.01 – 1.0 | 0.10 |
+| Discount factor γ | 0.5 – 0.999 | **0.99** |
+| Exploration ε | 0.0 – 1.0 | 1.00 |
+| Minimum exploration | 0.0 – 0.5 | 0.05 |
+| Exploration decay | 0.9 – 1.0 | 0.995 |
+| Initial Q value | 0 – 150 | 0 |
+| Episodes to train | 100 – 8000 | **4000** |
 
-Against +235.7 for the best hand-flown route, so the learner gets close to a
-controller written knowing the answer. The greedy policy lands in 1063 steps
-for +233.2. The last hundred episodes still crash 4% of the time, because ε
-stops at 0.02 rather than reaching zero and a random thrust in the lower
-downdraught is occasionally unrecoverable.
+### Replay and graphs
 
-## Why a table is the wrong tool, measured rather than asserted
+Reward per episode, steps per episode, exploration rate and convergence
+measure, all rendering real recorded data. Every recorded episode is
+replayable; the generators turning green in order, and the agent learning to
+wait at a shut door, are both visible frame by frame.
 
-The room ships with a discretised table beside the two approximating methods,
-and it was built expecting it to fail outright. **That is not what happens.**
-Landings in the last 100 episodes of a run of N, same chamber, same seed:
+### Why Q-Learning fits
 
-| Method | N=300 | N=600 | N=1200 | Memory |
-|---|---|---|---|---|
-| Tile coding, 8 tilings | 2% | **86%** | **97%** | 10,368 weights |
-| Table, 8 buckets an axis | 0% | 0% | 38% | 4,096 rows |
-| Table, 20 buckets an axis | 0% | 2% | 95% | 160,000 rows |
+Q-Learning's **off-policy** target bootstraps from the best next action rather
+than the one exploration happened to take. Over a long chain of unrewarded
+steps this propagates credit back without waiting for a lucky run of good
+choices — which is exactly what a six-errand sequence needs. Double
+Q-Learning, SARSA and Expected SARSA are offered for contrast.
 
-So the honest claim is about **sample efficiency and memory**, not capability.
-The tile coder is competent at 600 episodes where the best table is at 2%, and
-gets there with a fifteenth of the memory. The table catches up by 1200.
+---
 
-The bucket count cannot be set well, and both ends are in that table. Coarse
-buckets put different situations in one row — at eight an axis, one row spans a
-1.25 m square and a quarter of the speed range, so "drifting gently towards the
-platform" and "closing far too fast" share a row and no policy written in that
-table can tell them apart; 38% is that ceiling, not slow learning. Fine buckets
-tell them apart and give up generalisation to do it. Overlapping offset tilings
-escape the choice rather than settling it.
+## Room 4 — Semi-gradient SARSA
 
-**Semi-gradient Q-Learning does not solve this room**, and it is kept because
-what it does instead is the most important caveat about function approximation.
-600 episodes, landings in the last 100:
+### A continuous world
 
-| γ | max \|weight\| | Landings |
+A wind tunnel of **10 × 10 metres**, integrated at `dt = 0.02 s` with
+semi-implicit Euler. There is no grid.
+
+* Two banks of fans drive air down across the approach
+* Turbine housings and the chamber wall are solid
+* A thruster-overcharge zone shortens the route and makes arriving slowly
+  harder
+* A stabilisation field damps motion
+
+### State
+
+`(x, y, vx, vy)` — position in metres, velocity in metres per second. Velocity
+is clamped to `|v| ≤ 1`.
+
+### Actions and continuous movement
+
+Five thrust inputs; each component is one of `{−1, 0, +1}`:
+
+```
+hold (0,0) · up (0,−1) · down (0,+1) · left (−1,0) · right (+1,0)
+```
+
+Thrust changes where the drone is *going*, not where it *is*: the action sets
+an acceleration, drag decays the velocity, and the position is carried by the
+new velocity. Movement is therefore continuous and momentum matters.
+
+### Tile coding and function approximation
+
+The state is four real numbers, so there are infinitely many states and no
+table can have a row for each. The space is covered by **8 overlapping
+tilings**, each offset from the last, and one weight is learned per tile.
+States near one another share most of their active tiles, so learning about one
+teaches the others; distant states share none and stay separate.
+
+A **discretised Q-table** is offered beside it specifically so it can be watched
+failing: too coarse cannot tell a gentle approach from a fast one, too fine
+never sees the same bucket twice.
+
+### Landing objective
+
+Touching the platform is easy. Touching it **below the landing speed limit** is
+the task — arriving too fast is a crash, not a landing.
+
+### Rewards
+
+| Event | Value |
+|---|---|
+| Each tick | −0.01 |
+| Progress toward the pad | +5 (shaped) |
+| Hitting a wall or housing | −100 |
+| Entering a danger zone | −5 |
+| Hard landing | −30 |
+| Landing within the speed limit | +200 |
+
+### Hyperparameters
+
+| Parameter | Range | Default |
 |---|---|---|
-| 0.950 | 9.9 | 0% |
-| 0.980 | 22.6 | 0% |
-| 0.990 | 6.4e+76 | 0% |
-| 0.995 | 1.1e+168 | 0% |
+| Learning rate α | 0.01 – 1.0 | **0.30** |
+| Discount factor γ | 0.5 – 0.999 | **0.995** |
+| Exploration ε | 0.0 – 1.0 | 1.00 |
+| Minimum exploration | 0.0 – 0.5 | **0.02** |
+| Exploration decay | 0.9 – 1.0 | **0.997** |
+| Tilings | 1 – 16 | 8 |
+| Buckets per axis | 3 – 20 | 8 |
+| Wind strength | 0.0 – 2.0 | 1.0 |
+| Landing speed limit | 0.05 – 1.0 | 0.30 |
+| Episodes to train | 100 – 8000 | **1200** |
 
-At the room's default γ the weights diverge outright — 10¹⁶⁸ is a broken run,
-not a large number — and lowering α slows it without stopping it. Below γ 0.99
-they stay bounded and it *still* will not brake: its episodes end 43% against a
-wall and 57% at the step limit, because the max operator prices every approach
-as though the braking will be done perfectly. Semi-gradient SARSA on the same
-chamber, same γ and same seed lands 71%. That is the deadly triad — off-policy
-updates, bootstrapping and approximation together — and room 2's on-policy
-contrast appearing here with far more force than room 2's own map managed.
+### Replay and graphs
 
-## What the tile coder actually does
-
-The state space is covered eight times over by grids of tiles, each offset from
-the last by an odd multiple of 1/8 of a tile along every axis. A state falls in
-exactly one tile of each grid, so it is described by eight overlapping features
-out of 8 × 6⁴:
-
-```
-Q(s, a) = Σ w[a][i]   over the 8 active features
-w[a][i] += (α / tilings) * [ r + γ Q(s′, a′) − Q(s, a) ]
-```
-
-Nearby states share most of their active tiles, so learning about one teaches
-most of what there is to know about the other — that is generalisation, and it
-is the whole point. Distant states share none, so they stay separate.
-
-Two details that are not incidental. **α is divided by the number of tilings**
-because all eight move by the full amount and are then summed again on the next
-lookup; without the division the effective step size is eight times what the
-slider says and the weights diverge within a few hundred steps. And the offsets
-are asymmetric — offsetting every axis equally lays the tilings along a
-diagonal of the space, resolving diagonal differences well and single-axis ones
-barely at all.
-
-**γ defaults to 0.995** because the landing is several hundred steps from the
-launch, and a discount that would do for a ten-cell grid leaves the platform
-worth nothing by the time the value reaches the start.
-
----
-# The interface
-
-Both screens are hand-written canvas and JavaScript — no 3D engine, no charting
-library, no framework. `shapes.js` holds one drawing recipe per kind of thing, so
-a wall is the same wall in every chamber and the legend is drawn by the very code
-that draws the world; a thing cannot appear on the grid without appearing in the
-key.
-
-**Room 1** uses `web/level/` — a planner's screen, measured in sweeps, with the
-value table as a heatmap and the greedy policy as arrows.
-
-**Rooms 2 and 3** use `web/room/`, built around episodes:
-
-* **Play trains, and you watch it.** Each frame asks the server for a slice of
-  work and draws the world that came back. Speeds are rates per *second* — the
-  loop carries the fractional remainder between frames, because asking for a
-  whole step every frame would make the slowest speed twenty times too fast at
-  60 fps. Turbo is not paced at all.
-* **Once it is trained, Play shows the route it learned** — and that is a
-  different thing from any episode it trained on. ε stops at `epsilon_min`,
-  0.05 by default, rather than decaying to zero, so even the last episode of a
-  finished run still takes a random step about one time in twenty and visibly
-  doubles back on itself. What Play shows instead is one run of the greedy
-  policy with the exploration taken out. Measured in room 2 at the defaults:
-  the last recorded episode that reached the exit wanders through 22 steps for
-  +76, with a step into the west wall in the middle of it, and the policy
-  behind that same episode walks the route cleanly in 21 for +79. It is
-  recorded once, on the server, and animated by the page, so leaving it looping
-  cannot touch what was learned. When the policy does *not* get out — an
-  undertrained run loops until the 400-step limit — the panel says so rather
-  than presenting the wandering as the answer.
-* **Graphs fill in as it learns**, pulled from the recording every two seconds.
-* **Episode replay** — 40 whole episodes are kept per run, spread across it with
-  the first and last three always included, since that is where behaviour differs
-  most. Early ε-random episodes routinely run to the 400-step limit, which is why
-  the budget is a few dozen and not all of them.
-* **Step replay** — any recorded episode, any single step, held still, with
-  everything that was true at that moment: the guard's position, which doors were
-  open, which planks had gone, which keys were in hand. It reads the recording
-  and changes nothing, so it can be scrubbed mid-run.
-* **Compare methods** — described above.
-
-The sidebar opens by default on both screens, since that is where a chamber
-explains itself.
-
-Every frame describes the **whole world** rather than what changed since the
-last one. That is what lets the same code feed a recorded replay, which is walked
-in order, and the live view, which can be joined at any moment.
+Reward per episode, steps per episode, exploration rate and convergence
+measure. Replay records **every physics tick**, so a flight plays back at the
+speed it was flown and the landing can be studied frame by frame.
 
 ---
 
-# Verification
+## Room 5 — Function Approximation Navigation
 
-None of this is required by the brief; it is self-imposed, and it is how every
-number in this file was arrived at.
+### Dynamic obstacle generation and random layouts
 
-`game/` is plain Python with no display dependency, so it is
-driven directly from scripts: route lengths by breadth-first search over the real
-rules, the SARSA-vs-Q-Learning question by parameter sweeps, the plank odds by
-2000 crossings, the guard patrol by checking it is a closed loop of adjacent
-non-wall cells, and the reward-cycle bug by solving at six values of γ.
+An automated storage facility, 10 × 10 metres and continuous, that
+**rearranges itself between episodes**. It exists to settle one question: did
+R-5 learn to adapt, or only memorise four rooms?
 
-The browser half is checked without a browser: `node --check` on every script,
-and the page booted under a stubbed DOM and canvas against a running `serve.py`
-— which is what caught the metric reading `NaN`, the step inspector resolving
-episode numbers as array positions, and two animation loops painting the same
-canvas.
+Every episode is generated from a layout seed. What varies:
 
-**There is now an automated suite for rooms 1 and 4: 76 tests, all passing.**
+* shelf positions, and the positions of both objectives
+* the **number** of security drones (`obstacles ± obstacle_variation`)
+* drone patrol circuits and speed
+* diagonal security beams
+
+Security drones are **0.5 m across** (`OBSTACLE_RADIUS = 0.25`) and patrol
+closed circuits. Layouts are validated by breadth-first search before use, so a
+generated warehouse is always solvable.
+
+### Observation radius
+
+R-5 **cannot see the map**. It has a forward sensor cone of configurable depth
+(`sensor_range`, default **3.0 m**, half-angle ≈ 0.55 rad). Visibility is
+decided **centre-to-centre**: an obstacle is visible when the distance between
+centres is within the sensor range, with no radius subtracted. The observation
+handed to the learner is 14 numbers — local features only.
+
+### Continuous movement
+
+The same integrator as Room 4 (`dt = 0.02 s`), with `action_repeat = 10`: one
+decision every 0.2 s, held for ten physics ticks.
+
+### Obstacle avoidance and the two-stage mission
+
+1. Reach the **control terminal** to disarm the security system
+2. Escape through the **blast door** it unlocks
+
+The stage is part of the state, so the same position means different things
+before and after activation. Beams stay lit until the terminal is reached.
+
+### State
+
+`(x, y, vx, vy, stage, phase)`. `phase` is a bounded integer from which every
+moving obstacle's position is a pure function, which is what keeps the state
+Markov without storing each drone separately.
+
+### Rewards
+
+| Event | Value |
+|---|---|
+| Each decision | −0.02 |
+| Progress toward the current objective | +4 (shaped) |
+| Hitting a shelf or wall | −50 |
+| Hitting a security drone | −60 |
+| Crossing a security beam | −60 |
+| Leaving the bounds | −50 |
+| Reaching the terminal | +80 |
+| Reaching a still-locked exit | −5 |
+| Escaping | +250 |
+| Timing out | −80 |
+
+### Generalisation, validation and testing
+
+Three **disjoint** pools of layout seeds, enforced at construction:
+
+| Pool | Layouts | Purpose |
+|---|---|---|
+| Training | 120 | what the agent learns on |
+| Validation | 10 | periodic check during training |
+| Unseen test | 20 | never trained on |
+
+Evaluation runs with the **weights frozen** and the environment's random state
+restored afterwards, so measuring never perturbs the run. Because the score
+that counts is measured on warehouses never trained on, a memorised route is
+worth nothing by construction — only a linear model over *local* features can
+transfer. A **Test on new random room** control runs the frozen policy on a
+single unseen layout on demand.
+
+### Hyperparameters
+
+| Parameter | Range | Default |
+|---|---|---|
+| Learning rate α | 0.01 – 1.0 | **0.20** |
+| Discount factor γ | 0.5 – 0.999 | **0.97** |
+| Exploration ε | 0.0 – 1.0 | 1.00 |
+| Minimum exploration | 0.0 – 0.5 | 0.05 |
+| Exploration decay | 0.9 – 1.0 | **0.9985** |
+| Tilings | 1 – 16 | 8 |
+| Sensor range (m) | 1.0 – 10.0 | 3.0 |
+| Security drones | 0 – 6 | 2 |
+| Drone count variation | 0 – 3 | 1 |
+| Drone speed | 0.1 – 1.5 | 0.35 |
+| Storage shelves | 0 – 8 | 3 |
+| Episode length (steps) | 100 – 800 | 300 |
+| Training layouts | 10 – 400 | 120 |
+| Validation layouts | 5 – 100 | 10 |
+| Unseen test layouts | 5 – 100 | 20 |
+| Random seed | 0 – 999 | 0 |
+| Episodes to train | 100 – 8000 | **4000** |
+
+### Replay and graphs
+
+Ten graphs (listed below). Replay reproduces an episode exactly, **including
+the layout it was recorded in** — a replay animates the right trajectory
+through the right warehouse, not through whichever layout happens to be
+current.
+
+---
+
+## Hyperparameters
+
+Parameters marked **live** take effect immediately; **reset** parameters change
+the environment or the representation, so the run must be restarted. The
+interface says which is which, and marks a run stale when a reset parameter has
+been moved but not applied.
+
+| Parameter | Scope | Room 1 | Room 2 | Room 3 | Room 4 | Room 5 |
+|---|---|---|---|---|---|---|
+| Discount factor γ | reset | 0.95 | 0.95 | 0.99 | 0.995 | 0.97 |
+| Stopping threshold θ | live | 1e−4 | — | — | — | — |
+| Learning rate α | live | — | 0.10 | 0.10 | 0.30 | 0.20 |
+| Exploration ε | live | — | 1.00 | 1.00 | 1.00 | 1.00 |
+| Minimum exploration | live | — | 0.05 | 0.05 | 0.02 | 0.05 |
+| Exploration decay | live | — | 0.995 | 0.995 | 0.997 | 0.9985 |
+| Initial Q value | reset | — | 30 | 0 | — | — |
+| Episodes to train | live | — | 1500 | 4000 | 1200 | 4000 |
+| Ice slipperiness | reset | 0.20 | 0.20 | — | — | — |
+| Battery bonus | reset | 10 | — | — | — | — |
+| Bridge collapse probability | reset | — | 0.10 | — | — | — |
+| Tilings | reset | — | — | — | 8 | 8 |
+| Buckets per axis | reset | — | — | — | 8 | — |
+| Wind strength | reset | — | — | — | 1.0 | — |
+| Landing speed limit | reset | — | — | — | 0.30 | — |
+| Sensor range | reset | — | — | — | — | 3.0 m |
+| Obstacle controls | reset | — | — | — | — | drones, variation, speed, shelves |
+| Layout pools | reset | — | — | — | — | 120 / 10 / 20 |
+
+---
+
+## Graphs
+
+### Rooms 2, 3 and 4 — the shared four
+
+| Graph | What it measures |
+|---|---|
+| **Reward per episode** | Total return per episode. The headline learning curve: it should rise and then flatten. |
+| **Steps per episode** | Episode length. Falls as the agent stops wandering; in Room 4 it reflects flight time. |
+| **Exploration rate** | ε as it decays. Explains *why* the reward curve changes: early noise is exploration, not failure. |
+| **Convergence measure** | The magnitude of the learning update. Approaching zero means the value estimates have stopped moving. |
+
+### Room 1 — the planner
+
+| Graph | What it measures |
+|---|---|
+| **Largest value change per sweep** | The largest change to any state's value in one sweep, on a logarithmic axis, with the stopping threshold θ as a dashed line. This is exactly the quantity the stopping rule tests — the run halts when the curve crosses the line. |
+
+Room 1 shows only this graph because Value Iteration has no episodes and no
+exploration rate; the episodic graphs would be permanently empty.
+
+### Room 5 — ten graphs
+
+| Graph | What it measures |
+|---|---|
+| **Reward per episode (with moving average)** | Return, with a rolling mean over the noise of random layouts |
+| **Episode length** | Decisions taken before the episode ended |
+| **Complete escape rate** | Fraction of episodes finishing the whole two-stage mission |
+| **Terminal activation rate** | Fraction reaching stage 1 — progress even when the escape fails |
+| **Collision rate** | Fraction ending against a shelf, wall, drone or beam |
+| **Timeout rate** | Fraction that simply ran out of steps |
+| **Exploration rate ε** | The decay schedule |
+| **Mean \|TD error\|** | Average magnitude of the temporal-difference error — the approximation's own convergence signal |
+| **Weight norm ‖w‖** | Size of the learned weight vector; a diverging norm is the classic failure mode of semi-gradient methods |
+| **Escape rate — train vs validation vs unseen test** | Three lines from frozen-weight evaluation. **The graph the room exists for**: the gap between train and unseen is the generalisation gap. |
+
+### Method comparison
+
+Every room can run its offered methods against the same layout, parameters and
+seed, and draw the resulting curves on one set of axes. The results panel is
+**hidden until at least two methods have produced real curves** — there is no
+empty chart and no fabricated data. If fewer than two produce a curve, the
+panel says so in words.
+
+---
+
+## Replay System
+
+Training shows what happened on average; replay shows what happened
+*specifically*.
+
+* **Recording.** A sample of episodes is stored frame by frame — position,
+  velocity, action, reward, entity states and entity positions. Room 4 records
+  every physics tick; Room 5 records one frame per decision, plus the layout
+  seed the episode was generated in.
+* **Browsing.** Recorded episodes are listed with their outcome and return.
+  Selecting one loads it into the player.
+* **Transport.** Play, pause and single-step, at four speeds. A replay loops,
+  holding briefly on its final frame.
+* **Step inspector.** Any frame of any episode can be examined without
+  disturbing the run: the exact state, the action taken, the reward, and the
+  cumulative return to that point.
+* **Show final route.** Plays the **greedy** policy — exploration removed —
+  rather than a recorded episode, so what is shown is the answer the agent
+  settled on rather than exploration noise.
+* **Exactness.** A replay reproduces the episode as recorded, including which
+  layout it happened in.
+
+This is what makes a failure diagnosable: a reward curve that plateaus does not
+say whether the agent is crashing, timing out or circling — the replay does.
+
+---
+
+## User Interface
+
+### Intro animation
+Four player-paced slides over a live animation of a robot failing, learning and
+finally running clean. Advance with `NEXT`, `SPACE`, `ENTER` or a click; `SKIP`
+or `ESC` ends it. A caption reads the animation's true attempt number, so the
+loop reads as learning rather than repetition. Shown once per session.
+
+### About section
+Six holographic slides on a blurred laboratory background: the premise, then
+one per sector. Each sector slide carries the same five headings — **Mission,
+Algorithm, Objective, Obstacles, Why this algorithm fits** — plus a small
+looping animated preview of that room's central hazard and a "watch for" note.
+The previews are hand-drawn demonstrations; they do not run the environment.
+
+### Training
+Each chamber shows the world on a canvas, a live status strip, collapsible
+panels for controls, parameters, graphs, method comparison and episode replay,
+and a legend generated from the room's own contents — so no chamber lists an
+object it does not contain. Four speed tiers, from step-by-step to turbo.
+
+### Replay
+As described above.
+
+### Mission Complete screen
+A full-screen flash confirming the chamber is cleared. It appears **once**, and
+only after R-5 has been watched arriving at the exit with its final movement
+finished — never during training, and never over a robot that is still walking.
+
+### Final victory screen
+After Room 5 only: a dedicated ending sequence with an animated scene, a
+training summary read from the run, and four choices — *Replay Final Escape*,
+*View Training Results*, *Play Again*, *Main Menu*. It is modal while open, and
+*View Training Results* hands the room back with the graphs and replay list
+still reachable, so the player can always inspect before leaving.
+
+---
+
+## Project Structure
+
+```
+RL-Escape-Room/
+├── serve.py                  standard-library HTTP server and JSON API
+├── requirements.txt          pytest only; the app itself needs nothing
+├── pytest.ini
+│
+├── game/                     all environments, algorithms and training
+│   ├── rooms.py              the five room definitions: layouts, rewards,
+│   │                         parameters, graphs and briefing text
+│   ├── grid.py               the tabular grid environment (rooms 1–3)
+│   ├── reactor.py            room 3's generators, keys, doors and patrol
+│   ├── drone.py              room 4's continuous flight physics
+│   ├── warehouse.py          room 5's procedural warehouse and sensors
+│   ├── session.py            training loop, evaluation, replay recording
+│   ├── recorder.py           frame-by-frame episode capture
+│   ├── definition.py         translates a room into the frontend contract
+│   ├── config.py             parameter specifications and entity appearance
+│   ├── comparison.py         running several methods on one layout
+│   └── algorithms/           value_iteration, policy_iteration, sarsa,
+│                             expected_sarsa, q_learning, double_q_learning,
+│                             semi_gradient_sarsa, semi_gradient_q,
+│                             discretised_q, tile_coding, linear, tabular
+│
+├── web/                      the browser half; no build step
+│   ├── index.html            start screen, intro and About
+│   ├── levels/               chamber select and progression
+│   ├── room/                 the chamber screen
+│   └── assets/
+│       ├── shapes.js         every drawing recipe, on canvas
+│       ├── intro.js/.css     the opening briefing
+│       ├── about.js          the About slides
+│       ├── about-preview.js  the looping sector previews
+│       └── room/
+│           ├── shell.js      the chamber screen's controller
+│           ├── renderer.js   world drawing and camera
+│           ├── playback.js   replay state machine and transport
+│           ├── charts.js     every graph
+│           ├── compare.js    method comparison
+│           ├── producer.js   talks to the server
+│           ├── contract.js   the data contract, documented
+│           └── ending.js     the final victory sequence
+│
+└── tests/                    pytest suite (286 tests)
+```
+
+---
+
+## Running locally
+
+**Requirements:** Python 3.9 or newer. Nothing else.
 
 ```bash
-python3 -m pytest tests -q      # 76 passed
+# 1. Clone the repository
+git clone https://github.com/michelleshumilov1998-ai/RL-Escape-Room.git
+cd RL-Escape-Room
+
+# 2. Start the server (standard library only — no installation needed)
+python3 serve.py
+
+# 3. Open the game in a browser
+#    http://localhost:8000
 ```
 
-`tests/test_game_room1.py` was broken until recently — it imported a name
-`game.grid` has not got and its assertions described an earlier version of the
-map, so it could not even be collected. It has been rewritten against the
-current code, and writing it is what turned up the two corrections above: the
-teleporter measurement depends on what the pads become, and the slipperiness
-slider is not quite as inert as this file claimed.
+To run the test suite:
 
-`tests/test_game_room4.py` is 52 tests over the continuous room — the
-integration, the velocity clamp, each thrust axis, drag, the position-based
-fields, determinism, collision against the *drawn* geometry, both landing
-outcomes, the tile coder's generalisation, one hand-checked SARSA update, the
-α-across-tilings division, terminal targets not bootstrapping, seeded
-reproducibility, and the room contract.
-
-**Rooms 2 and 3 still have no tests, and that is the remaining hole.**
-Everything measured about them in this file was measured by hand — repeatably,
-but by hand.
-
-The browser half is checked without a browser: `node --check` on every script,
-and all four pages booted under a stubbed DOM and canvas — which is what caught
-the metric reading `NaN`, the step inspector resolving episode numbers as array
-positions, and two animation loops painting the same canvas.
+```bash
+pip install -r requirements.txt      # pytest, for the tests only
+python3 -m pytest                    # 286 tests
+```
 
 ---
 
-# Known gaps
+## GitHub repository
 
-Stated plainly, because a README that documents intentions rather than the code
-is worse than none.
-
-**There are four chambers, which is what the brief asks for.** Room 5 — a
-procedurally generated warehouse solved with local features — is still missing.
-It needs procedural layouts and a local-feature observation, and the deleted
-Streamlit implementation is recoverable from git (`git show da150e3 --stat`) if
-it is worth porting rather than rewriting.
-
-**The chamber select does not know what is built.** `web/assets/levels.js`
-hardcodes all five chambers as available and never consults `/api/rooms`, so
-entering 5 shows a failure message rather than being locked. Room 4 is reachable
-directly at `/room/?room=4`; through the menu it is gated behind clearing 1 to 3,
-which is the intended progression rather than a bug.
-
-**The game is not published.** The brief asks for it to be reachable online, and
-`serve.py` binds `127.0.0.1`. The option that keeps the Python as the thing that
-actually runs is Pyodide: `game/` is pure standard library, so it should load in
-the browser as WebAssembly, the whole HTTP layer would disappear and the result
-would be a static site deployable anywhere. Untried.
-
-**Room 1's slipperiness control has no effect**, and **room 2 does not reproduce
-the on-policy/off-policy contrast.** Both are measured, both are explained in
-their sections, and both are properties of the current maps rather than of the
-algorithms.
-
-**Room 3 is untuned.** Its 4000-episode default is a guess, its comparison takes
-four minutes, and the on-policy methods beating the off-policy ones is
-unexplained.
+<https://github.com/michelleshumilov1998-ai/RL-Escape-Room>
 
 ---
 
-# What each algorithm actually does
+## Authors
 
-Each is one file, and the four model-free ones differ in a single method —
-`target`, the expression the update moves towards. If implementing the second had
-required touching a room, the layering would be wrong.
+**Michelle Shumilov** — <michelle.shumilov1998@gmail.com>
 
-| Method | Target |
-|---|---|
-| SARSA | `r + γ Q(s′, a′)` — the action actually taken next |
-| Expected SARSA | `r + γ Σ π(a\|s′) Q(s′, a)` — averaged over the policy |
-| Q-Learning | `r + γ max_a Q(s′, a)` — the best action available |
-| Double Q-Learning | `r + γ Q_b(s′, argmax Q_a)` — chosen by one table, valued by the other |
-
-The two planners share `q_value(env, s, a, V, γ) = Σ P(s′\|s,a)[R + γV(s′)]` and
-are built from that one line. They are the only methods handed `env.transitions()`;
-`needs_model` says which, and the model-free ones are never given the environment's
-model at all — the only way they find out what an action does is to take it.
-
-Two details in the tabular code that are not incidental:
-
-**Ties are broken randomly.** A fresh table is uniform, so every action ties at
-the start; always taking the first would send the agent the same way on every
-early episode and whole parts of a room would never be seen.
-
-**Optimistic initialisation** (`q_init`, 90 in room 2) makes an untried action
-look better than a tried one, so a route that fails early gets reconsidered
-instead of abandoned.
+Final project in Reinforcement Learning.
