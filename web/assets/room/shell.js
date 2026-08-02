@@ -744,8 +744,24 @@
    * after a run finished.
    */
   function recordedMetrics() {
-    if (ui.recorded) return ui.recorded.metrics;
-    return ui.playback.metrics;
+    if (ui.recorded && ui.recorded.metrics.length) return ui.recorded.metrics;
+    if (ui.playback.metrics.length) return ui.playback.metrics;
+
+    /* A PLANNER KEEPS NO PER-EPISODE METRICS, AND STILL HAS A ROUTE.
+       Room 1 is Value Iteration: it sweeps the state space rather than
+       running episodes, so `metrics` is empty and always will be. It does
+       record the one greedy walk as an episode -- and because the replay
+       browser is built from metrics, that route was never listed and the
+       panel read "episodes appear here as they are recorded" forever.
+
+       The rows are derived from the episodes that were actually recorded.
+       Nothing is invented: if there is no episode there is no row. */
+    const batch = ui.recorded || window.Producer.batch || {};
+    return (batch.episodes || []).map(episode => ({
+      episode: episode.index,
+      reward: episode.totalReward,
+      steps: Math.max(0, (episode.steps || []).length - 1),
+    }));
   }
 
   /**
