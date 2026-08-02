@@ -373,9 +373,16 @@ window.Charts = (function () {
       const history = bundle.history || bundle.metrics || [];
 
       built.forEach(chart => {
-        const rows = chart.series.source === 'checkpoints'
-          ? (bundle.checkpoints || [])
-          : history;
+        /* Where this chart's rows come from.
+
+           `checkpoints` is room 5's frozen-policy evaluation, on its own
+           x-axis. `sweeps` is room 1's planner curve: Value Iteration has no
+           episodes, so its progress is one point per sweep of the state
+           space and it cannot be read from the episode history at all. */
+        const source = chart.series.source;
+        const rows = source === 'checkpoints' ? (bundle.checkpoints || [])
+                   : source === 'sweeps' ? (bundle.sweeps || [])
+                   : history;
 
         if (chart.series.keys) {
           const lines = chart.series.keys.map((name, index) => ({
@@ -396,9 +403,15 @@ window.Charts = (function () {
 
         const values = rows.map(entry => entry[chart.series.key])
           .filter(value => typeof value === 'number' && isFinite(value));
-        const threshold = typeof chart.series.threshold === 'function'
-          ? chart.series.threshold(context)
-          : chart.series.threshold;
+        /* The stopping line. A room declared in JSON cannot hand over a
+           function, so it names a parameter instead and it is resolved here
+           — which is how room 1's dashed theta line follows its slider. */
+        let threshold = chart.series.threshold;
+        if (typeof threshold === 'function') threshold = threshold(context);
+        if (chart.series.thresholdKey && context && context.parameters) {
+          const named = context.parameters[chart.series.thresholdKey];
+          if (typeof named === 'number' && isFinite(named)) threshold = named;
+        }
 
         drawSeries(chart.canvas, values, colours, {
           scale: chart.series.scale,

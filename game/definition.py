@@ -313,7 +313,7 @@ def build(room, env, parameters):
     entity_types = {kind: _entity_type(config.ENTITIES[kind])
                     for kind in sorted(kinds_used)}
 
-    return {
+    described = {
         "id": room["key"],
         "name": room["name"],
         "sector": room["sector"],
@@ -326,3 +326,14 @@ def build(room, env, parameters):
         "parameterSchema": _schema(room, parameters),
         "metric": _metric(room),
     }
+
+    # A room may name its own graphs, and a grid room may need to just as much
+    # as a continuous one. This passthrough existed only in `build_continuous`,
+    # so a grid room could declare `charts` and be silently ignored — which is
+    # what happened to room 1: it is a planner, it has no episodes, and it was
+    # left drawing the shared four episode graphs, all of them permanently
+    # empty under labels describing quantities Value Iteration never produces.
+    if room.get("charts"):
+        described["charts"] = [dict(chart) for chart in room["charts"]]
+
+    return described

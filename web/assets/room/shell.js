@@ -759,9 +759,32 @@
    * `checkpoints` is different again: held-out measurements taken every few
    * hundred episodes with the weights frozen.
    */
+  /**
+   * What the graphs are drawn from.
+   *
+   * Normally the episode metrics. A planner has none: room 1 sweeps the state
+   * space and the far end reports its progress as `snapshot.curve`, one point
+   * per sweep. That curve is turned into rows here so the charts panel can
+   * read it the same way it reads everything else, under `sweeps`.
+   */
   function chartData() {
-    if (ui.recorded) return ui.recorded;
-    return ui.playback.metrics;
+    const base = ui.recorded ? ui.recorded : ui.playback.metrics;
+    const curve = window.Producer.snapshot && window.Producer.snapshot.curve;
+    if (!curve || !curve.points || !curve.points.length) return base;
+
+    const sweeps = curve.points.map((value, index) => ({
+      delta: value,
+      sweep: (curve.x && curve.x[index]) || index + 1,
+    }));
+    // An array is the old shape and still means "the episode history", so the
+    // bundle keeps it under `history` and adds the planner's rows beside it.
+    return Array.isArray(base) ? { history: base, sweeps: sweeps }
+                               : Object.assign({}, base, { sweeps: sweeps });
+  }
+
+  /** Live values a graph may need — room 1's dashed theta line follows this. */
+  function chartContext() {
+    return { parameters: ui.parameters };
   }
 
   function buildEpisodeList(metrics) {
@@ -1372,7 +1395,7 @@
     paintEpisodeDetail();
     paintFinalRouteHint();
     paintInspector();
-    if (ui.repaintCharts) ui.repaintCharts(chartData());
+    if (ui.repaintCharts) ui.repaintCharts(chartData(), chartContext());
   }
 
   /* ---------------------------------------------------------------------
@@ -1565,7 +1588,7 @@
       buildEpisodeList();
       buildInspectorEpisodes();
       paintInspector();
-      if (ui.repaintCharts) ui.repaintCharts(batch);
+      if (ui.repaintCharts) ui.repaintCharts(batch, chartContext());
     }).catch(() => { ui.fetchingBatch = false; });
   }
 
@@ -1615,7 +1638,7 @@
         buildInspectorEpisodes();
         // The recording's own metrics, not the played count — nothing has been
         // played back yet, and the graphs are about what happened in training.
-        if (ui.repaintCharts) ui.repaintCharts(batch);
+        if (ui.repaintCharts) ui.repaintCharts(batch, chartContext());
         // Straight to the learned route, rather than to the top of a batch of
         // exploratory episodes. Selecting it is what puts playback into
         // REPLAYING, so Play and Pause drive that one route on a loop.
@@ -1792,7 +1815,7 @@
     buildInspectorEpisodes();
     buildGeneralisation();
     paintEvaluation(null);
-    if (ui.repaintCharts) ui.repaintCharts([]);
+    if (ui.repaintCharts) ui.repaintCharts([], chartContext());
     refit();
     paintAll();
     ui.world.draw({ room: ui.room, position: null });
@@ -2001,7 +2024,7 @@
           buildEpisodeList();
           buildInspectorEpisodes();
           paintInspector();
-          if (ui.repaintCharts) ui.repaintCharts(chartData());
+          if (ui.repaintCharts) ui.repaintCharts(chartData(), chartContext());
         }
 
         if (dom.scrub && !dom.scrub.hidden) {

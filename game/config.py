@@ -223,8 +223,11 @@ ENTITIES = {
         "label": "Battery", "colour": "--goal", "shape": "battery",
         "in_legend": True, "role": "static",
     },
+    # "Pad" on its own said nothing about what the thing does, and room 4 has
+    # a landing platform that is also a pad. The legend is the only place the
+    # teleport is ever explained, so it says what it is.
     "teleport": {
-        "label": "Pad", "colour": "--accent", "shape": "teleport",
+        "label": "Teleport pad", "colour": "--accent", "shape": "teleport",
         "in_legend": True, "role": "static",
     },
     "oneway": {

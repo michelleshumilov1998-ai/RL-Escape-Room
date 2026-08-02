@@ -113,6 +113,30 @@ ROOM1 = {
     # What the status strip's one metric is.
     "metric": {"key": "startValue", "label": "V(start)", "format": "%.2f"},
 
+    # THE PLANNER'S GRAPH, WHICH IS NOT AN EPISODE GRAPH.
+    #
+    # A room that names no charts gets the shared four: reward per episode,
+    # steps per episode, exploration rate, convergence measure. Every one of
+    # those is a property of an *episode*, and Value Iteration does not have
+    # episodes. It sweeps the state space, and it has no exploration rate at
+    # all. So this room drew four graphs that were empty, permanently, under
+    # four labels describing quantities the algorithm never produces.
+    #
+    # What it does measure is the largest change to any state's value in a
+    # sweep, which is exactly the quantity the stopping rule tests: it halts
+    # when that falls below theta. The far end has always sent it as
+    # `snapshot.curve`; nothing was drawing it. One graph, of the thing the
+    # algorithm actually computes, with the stopping threshold on it.
+    #
+    # `source: sweeps` is what tells the charts panel to read the planner
+    # curve rather than the episode history, and `thresholdKey` makes the
+    # dashed line follow the theta slider.
+    "charts": [
+        {"key": "delta", "source": "sweeps", "scale": "log",
+         "thresholdKey": "theta",
+         "label": "Largest value change per sweep"},
+    ],
+
     "info": {
         "objective": "Cross the beam wall to the control panel and shut the "
                      "security grid down. Every rule of this room is known "
