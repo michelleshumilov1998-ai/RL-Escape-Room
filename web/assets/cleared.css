@@ -1,0 +1,87 @@
+/* =====================================================================
+   The sector-cleared flash.
+
+   A full-screen wash and three lines of type, in the green the whole
+   project uses for a system that has ended up how R-5 wanted it. Every
+   value here is a token from base.css or derived from one.
+
+   `pointer-events: none` throughout: it is over the top of the chamber and
+   it never takes a click, so nothing behind it is blocked while it is up.
+   ===================================================================== */
+
+.cleared {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  display: grid;
+  place-items: center;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 700ms ease;
+  /* A pool of darkness with a green cast, so the type holds its contrast
+     over whatever the chamber happens to be doing behind it. */
+  background:
+    radial-gradient(ellipse 70% 55% at 50% 50%,
+      color-mix(in srgb, var(--goal) 12%, transparent) 0%,
+      transparent 70%),
+    radial-gradient(ellipse 90% 80% at 50% 50%,
+      color-mix(in srgb, var(--base) 88%, transparent) 0%,
+      color-mix(in srgb, var(--base) 55%, transparent) 60%,
+      color-mix(in srgb, var(--base) 0%, transparent) 88%);
+}
+
+.cleared.is-open { opacity: 1; }
+.cleared[hidden] { display: none; }
+
+.cleared-stage {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: clamp(0.7rem, 2vh, 1.3rem);
+  text-align: center;
+  padding: 2rem;
+}
+
+/* The headline: the start screen's weight and tracking, in the goal colour
+   with a glow, because this is the one moment the project shouts. */
+.cleared-title {
+  margin: 0 -0.24em 0 0;
+  font-size: clamp(1.6rem, 5.6vw, 3.6rem);
+  font-weight: 200;
+  letter-spacing: 0.24em;
+  text-transform: uppercase;
+  line-height: 1.05;
+  color: var(--goal);
+  text-shadow: 0 0 30px color-mix(in srgb, var(--goal) 45%, transparent);
+}
+
+.cleared-sector {
+  margin: 0;
+  font-size: clamp(0.78rem, 1.3vw, 1rem);
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: var(--title);
+}
+
+/* The third line is a status report, so it is set in the mono face the rest
+   of the project uses for machine output. */
+.cleared-next {
+  margin: 0;
+  font-family: var(--mono);
+  font-size: clamp(0.64rem, 1vw, 0.76rem);
+  letter-spacing: 0.14em;
+  color: color-mix(in srgb, var(--goal), var(--muted) 45%);
+}
+
+/* A hairline above and below the block, which is how every other panel in
+   the project frames a heading. */
+.cleared-rule {
+  width: min(20rem, 60vw);
+  height: 1px;
+  background: linear-gradient(90deg, transparent,
+              color-mix(in srgb, var(--goal) 55%, transparent), transparent);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .cleared { transition: none; }
+}

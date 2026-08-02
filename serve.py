@@ -147,6 +147,19 @@ def api_command(identifier, command, body):
             # Not a snapshot: the whole recording, which the room screen is
             # handed once a run has finished and then animates on its own.
             return session.batch()
+        if command == "evaluate":
+            # The learned policy measured on every layout pool, plus the random
+            # baseline. Nothing here updates a weight — see `Session.evaluate`.
+            layouts = body.get("layouts")
+            return session.run_evaluation(
+                None if layouts is None else int(layouts))
+        if command == "test-room":
+            # Generate an unseen warehouse and fly the frozen policy in it.
+            # `seed` is optional; without one a test layout that has not been
+            # shown yet is chosen, so "another room" really is another room.
+            seed = body.get("seed")
+            return session.run_test_room(
+                None if seed is None else int(seed))
         if command == "advance":
             budget = body.get("budgetMs")
             if budget is not None:

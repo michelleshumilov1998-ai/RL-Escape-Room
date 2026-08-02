@@ -9,6 +9,7 @@
 <link rel="stylesheet" href="../assets/level.css">
 <!-- Only for the comparison panel's colour key, which both screens share. -->
 <link rel="stylesheet" href="../assets/room/room.css">
+<link rel="stylesheet" href="../assets/cleared.css">
 </head>
 <body>
 
@@ -102,6 +103,18 @@
 
 <!-- The charts are shared with the room screen, and read their sizes and
      smoothing window from that screen's config. -->
+<!-- The sector-cleared flash. Over the top, never takes a click, clears
+     itself after five seconds. See `assets/cleared.js`. -->
+<section class="cleared" id="cleared" hidden aria-live="polite">
+  <div class="cleared-stage">
+    <div class="cleared-rule" aria-hidden="true"></div>
+    <p class="cleared-title">Mission Complete</p>
+    <p class="cleared-sector">Sector cleared</p>
+    <p class="cleared-next">Preparing next sector…</p>
+    <div class="cleared-rule" aria-hidden="true"></div>
+  </div>
+</section>
+
 <script src="../assets/room/config.js"></script>
 <script src="../assets/room/charts.js"></script>
 <!-- Shared with the room screen, so a wall is the same wall in both. -->
@@ -109,6 +122,7 @@
 <script src="../assets/sim.js"></script>
 <script src="../assets/renderer.js"></script>
 <script src="../assets/room/compare.js"></script>
+<script src="../assets/cleared.js"></script>
 <script src="../assets/level.js"></script>
 </body>
 </html>

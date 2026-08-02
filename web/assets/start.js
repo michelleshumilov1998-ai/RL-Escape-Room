@@ -74,9 +74,18 @@ const CONFIG = {
   hazards: {
     // The cycle of hazard types, in order, repeating forever.
     order: ['laser', 'pit', 'drone', 'bridge', 'gap'],
-    // The sweep is quick relative to the robot, so a robot that does not
-    // duck is certain to meet the beam while it is inside the corridor.
-    laser:  { corridor: 250, spread: 78, period: 0.8, tolerance: 0.55 },
+    // `period` is how long one full sweep of the beam takes, in seconds.
+    //
+    // 3.4 rather than 0.8. At 0.8 the beam strobed back and forth across the
+    // corridor several times while the robot was in it, which read as a
+    // flicker rather than as a sweep and pulled the eye away from the robot —
+    // the thing the scene is actually about.
+    //
+    // It does not change what happens. A fated robot dies at this hazard
+    // because of the second test in `negotiate` — "past the middle of the
+    // corridor" — not because the beam is quick, so the attempt it fails on
+    // and the attempt count are both unaffected. Only the sweep is slower.
+    laser:  { corridor: 250, spread: 78, period: 3.4, tolerance: 0.55 },
     pit:    { width: 130 },
     drone:  { range: 95, period: 2.4, hover: 74, size: 22,
               holdBuffer: 150, safeGap: 60, holdMax: 1.3, contact: 0.8 },
@@ -1035,13 +1044,63 @@ if (typeof reduceMotion.addEventListener === 'function') {
   reduceMotion.addEventListener('change', boot);
 }
 
+/* ---------------------------------------------------------------------
+   What the scene is doing, for anything that wants to caption it.
+
+   Read-only, and deliberately tiny: the intro layer puts "attempt 3 —
+   failed" on screen, and it can only do that honestly if it reads the
+   attempt the animation is actually on. Nothing here lets a caller change
+   the scene; there is no setter.
+
+   `escaping` is the clean run — the one after the last fated failure, which
+   is the whole point the scene exists to make.
+   ------------------------------------------------------------------- */
+
+window.StartScene = {
+  get attempt() { return state.attempt; },
+  get attempts() { return CONFIG.loop.attemptsBeforeEscape; },
+  get phase() { return state.phase; },
+  get escaping() {
+    return state.attempt > CONFIG.loop.attemptsBeforeEscape;
+  },
+  get running() { return frame !== null; },
+};
+
 /* ---- the two buttons ------------------------------------------------ */
 
-document.getElementById('start').addEventListener('click', () => {
-  window.location.href = 'levels/';
-});
+/**
+ * Leave for the chamber select, fading out first.
+ *
+ * The brief asks for a smooth transition into the first sector rather than a
+ * hard cut. The fade is CSS on `body`; navigation waits for it, and still
+ * happens if the transition never fires.
+ */
+function leaveForChambers() {
+  /* The fade is a nicety; the navigation is not. If anything at all goes wrong
+     with the class or the timer, PLAY still has to launch the game — so the
+     navigation is scheduled first and the fade is decoration around it. */
+  try {
+    document.body.classList.add('is-leaving');
+  } catch (problem) {
+    // No fade, then.
+  }
+  window.setTimeout(() => { window.location.href = 'levels/'; }, 620);
+}
 
-// ABOUT is where reset-progress will live. Nothing behind it yet.
-document.getElementById('about').addEventListener('click', () => {});
+/* PLAY and ABOUT, wired exactly as they were: PLAY goes to the chamber select
+   and ABOUT opens the About screen. Both are guarded so that a failure in one
+   cannot disable the other, and neither depends on the cinematic having run. */
+const startButton = document.getElementById('start');
+if (startButton) startButton.addEventListener('click', leaveForChambers);
+
+const aboutButton = document.getElementById('about');
+if (aboutButton) {
+  aboutButton.addEventListener('click', () => {
+    // Whatever the cinematic is doing, opening ABOUT ends it: the two must
+    // never be on screen together, and the player has plainly finished with it.
+    if (window.Intro && window.Intro.active) window.Intro.active.skip();
+    if (window.About) window.About.open();
+  });
+}
 
 boot();

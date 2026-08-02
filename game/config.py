@@ -122,13 +122,17 @@ ENTITIES = {
     # has to know what collapsing means.
     "collapsing": {
         "label": "Collapsing plank", "colour": "--cell-slippery",
-        "shape": "bridge", "in_legend": True, "role": "static",
+        # `bridgeWeak` rather than `bridge`: the same steel gantry with hazard
+        # chevrons and a stress crack on it, so a section that may give way is
+        # tellable from a sound one at a glance. Which is which is the whole
+        # decision this chamber is about, and a tint alone did not carry it.
+        "shape": "bridgeWeak", "in_legend": True, "role": "static",
         "states": {
             "collapsed": {"shape": "bridgeBroken", "colour": "--hazard"},
             # Named explicitly so an episode can declare every plank intact on
             # its first frame. A replay is watched on its own and must not
             # inherit the wreckage of the episode before it.
-            "sound": {"shape": "bridge", "colour": "--cell-slippery"},
+            "sound": {"shape": "bridgeWeak", "colour": "--cell-slippery"},
         },
     },
     # Room 3's furniture.
@@ -212,27 +216,131 @@ ENTITIES = {
     # None of these is a tile. The chamber has no grid, so the room hands its
     # entities over directly (`DroneWorld.entities`) and each carries a real
     # size in metres rather than being one cell square.
+    #
+    # Three of the five are things the model does: the landing platform, the
+    # turbine housings and the two fields. The other two — the chamber shell
+    # and the fans — are drawn explanations of rules that are already there,
+    # and neither applies a force of its own.
     "pad": {
-        "label": "Landing pad", "colour": "--goal", "shape": "pad",
+        "label": "Landing platform", "colour": "--goal", "shape": "platform",
         "in_legend": True, "role": "goal",
+        # What the platform looks like as the approach goes right or wrong. The
+        # words are opaque to the renderer, exactly as room 2's planks are: the
+        # room says what each state looks like and the drawing code only picks.
+        # Only the environment ever reports one of these — see `frame_extras`.
+        "states": {
+            "clear": {"shape": "platform", "colour": "--goal"},
+            "fast": {"shape": "platformWarning", "colour": "--hazard"},
+            "landed": {"shape": "platformLanded", "colour": "--goal"},
+            "crashed": {"shape": "platformCrashed", "colour": "--hazard"},
+        },
     },
     "pillar": {
-        "label": "Pillar", "colour": "--cell-wall", "shape": "pillar",
+        "label": "Turbine housing", "colour": "--cell-wall", "shape": "turbine",
         "in_legend": True, "role": "static",
     },
-    # Drawn with arrows, which is why the entity carries a vector: the
-    # renderer draws the direction it is given without knowing what wind is.
+    # The wind band. `stream` draws a lane of chevrons pointing downwind; which
+    # way that is comes over on the entity as `blows`, worked out from the wind
+    # vector in `drone.py` so the two halves cannot disagree about it.
     "wind": {
-        "label": "Wind band", "colour": "--cell-slippery", "shape": "wind",
+        "label": "Airflow", "colour": "--cell-slippery", "shape": "stream",
         "in_legend": True, "role": "static",
     },
     "slow": {
-        "label": "Thick air", "colour": "--cell-start", "shape": "slow",
-        "in_legend": True, "role": "static",
+        "label": "Stabilisation field", "colour": "--cell-start",
+        "shape": "stabiliser", "in_legend": True, "role": "static",
     },
     "boost": {
-        "label": "Thruster overcharge", "colour": "--hazard", "shape": "boost",
+        "label": "Thruster overcharge", "colour": "--hazard",
+        "shape": "overcharge", "in_legend": True, "role": "hazard",
+    },
+    # An industrial fan at the mouth of a wind zone. Decorative: the zone
+    # applies the force, and this is the visible reason it exists.
+    "fan": {
+        "label": "Ventilation fan", "colour": "--cell-wall", "shape": "fan",
+        "in_legend": True, "role": "static",
+    },
+    # No `tunnelWall` any more. Rooms 4 and 5 were enclosed by one entity
+    # spanning the whole chamber whose recipe drew a thin stroked frame with
+    # corner brackets and measurement ticks — a pressure vessel, and the single
+    # thing that most made them look like a different game from rooms 1 to 3.
+    # They now state a ring of ordinary `wall` tiles instead, so the masonry,
+    # the legend entry and the brick coursing are literally the grid rooms'.
+    # See `chamber_wall_entities` in `game/drone.py`.
+    "warningLight": {
+        "label": "Status lamp", "colour": "--hazard", "shape": "warningLight",
+        "in_legend": False, "role": "static",
+    },
+
+    # ---- room 5's furniture -------------------------------------------
+    # The warehouse. Every one of these has real collision geometry except the
+    # chamber shell, which is reused from room 4 and draws the boundary the
+    # environment actually ends a run at.
+    "shelf": {
+        "label": "Storage shelf", "colour": "--cell-wall", "shape": "shelf",
+        "in_legend": True, "role": "static",
+    },
+    # A patrolling cart: not a tile and not fixed either. Declared once at the
+    # start of its patrol and given a new position by every recorded step,
+    # exactly as room 3's guard is.
+    "cart": {
+        "label": "Security drone", "colour": "--hazard", "shape": "cart",
         "in_legend": True, "role": "hazard",
+    },
+    # A diagonal beam, back from room 1. Lit or dark, and the room says which:
+    # dark beams are drawn as an unpowered emitter line so the player can see
+    # where one is about to appear, which is what makes the timing learnable
+    # rather than a surprise.
+    "laser": {
+        "label": "Security beam", "colour": "--hazard", "shape": "laser",
+        "in_legend": True, "role": "hazard",
+        "states": {
+            "on": {"shape": "laser", "colour": "--hazard"},
+            "off": {"shape": "laserIdle", "colour": "--cell-wall"},
+        },
+    },
+
+    # ---- the working warehouse -----------------------------------------
+    # None of the three below has any collision geometry, appears in the
+    # observation, or is read by a single line of `step`. They are here because
+    # a warehouse with two enemies in it and nothing else moving reads as a
+    # room, not as a functioning building. `role: static` and out of the hazard
+    # legend, so nothing about them suggests they can hurt you.
+    "conveyor": {
+        "label": "Cargo line", "colour": "--cell-start", "shape": "conveyor",
+        "in_legend": True, "role": "static",
+    },
+    "crate": {
+        "label": "Cargo", "colour": "--cell-wall", "shape": "crate",
+        "in_legend": False, "role": "static",
+    },
+    "beacon": {
+        "label": "Alarm beacon", "colour": "--hazard", "shape": "beacon",
+        "in_legend": False, "role": "static",
+        "states": {
+            "alarm": {"shape": "beacon", "colour": "--hazard"},
+            "clear": {"shape": "beacon", "colour": "--goal"},
+            "dim": {"shape": "beaconDim", "colour": "--cell-wall"},
+        },
+    },
+    # The first objective. Armed until it is reached, then spent — and the
+    # environment is the only thing that says which.
+    "terminal": {
+        "label": "Control terminal", "colour": "--accent", "shape": "terminal",
+        "in_legend": True, "role": "goal",
+        "states": {
+            "armed": {"shape": "terminal", "colour": "--accent"},
+            "used": {"shape": "terminalUsed", "colour": "--goal"},
+        },
+    },
+    # The way out, shut until the terminal has been reached.
+    "blastdoor": {
+        "label": "Blast door", "colour": "--goal", "shape": "blastdoor",
+        "in_legend": True, "role": "goal",
+        "states": {
+            "locked": {"shape": "blastdoorLocked", "colour": "--hazard"},
+            "open": {"shape": "blastdoor", "colour": "--goal"},
+        },
     },
 }
 
@@ -286,14 +394,34 @@ PARAMETERS = {
                        "enough and the detour to fetch it starts paying for "
                        "itself; the plan then goes out of its way.",
     },
+    # Room 2's central control, and the one the chamber exists to demonstrate.
+    #
+    # THE NAME THE PLAYER SEES IS THE THING IT DOES
+    # It was labelled "Plank failure chance", which is the mechanism rather
+    # than the decision — the room is about whether to risk the bridge, so the
+    # control is named after that. The backend field is unchanged
+    # (`collapse_chance` -> `GridWorld.collapse`); only the label, the range
+    # and the step moved. There is deliberately no second parameter.
+    #
+    # The full 0 to 1 range, because both ends are worth being able to see: at
+    # 0.00 the bridge never gives way and the short route is simply correct, and
+    # at 1.00 every plank fails on the step that lands on it, so the bridge is
+    # certain death and the long way round is the only route. A slider that
+    # stopped at 0.5 could show neither end.
     "collapse_chance": {
-        "label": "Plank failure chance",
+        "label": "Bridge collapse probability",
         "symbol": "",
-        "minimum": 0.0, "maximum": 0.5, "step": 0.01, "default": 0.10,
+        # The default is unchanged at 0.10 on purpose: re-ranging a control is
+        # a presentation change, and moving its default would quietly alter
+        # what the room does out of the box.
+        "minimum": 0.0, "maximum": 1.0, "step": 0.05, "default": 0.10,
         "scope": "reset",
-        "explanation": "Chance that a plank gives way under the step that "
-                       "lands on it, which ends the run. Four planks at 0.10 "
-                       "means about two crossings in three get across.",
+        "explanation": "The chance that a bridge section gives way under the "
+                       "step that lands on it, which is a fall. Two sections "
+                       "in a row, so at 0.10 about four crossings in five get "
+                       "across and at 0.30 about half do. Changing it changes "
+                       "the environment, so the learned policy is discarded "
+                       "and has to be retrained.",
     },
     "alpha": {
         "label": "Learning rate",
@@ -380,6 +508,101 @@ PARAMETERS = {
                        "on purpose: wind that changed between episodes would "
                        "be a force the state cannot see, and the room would "
                        "stop being Markov.",
+    },
+    # ---- room 5's own -------------------------------------------------
+    "sensor_range": {
+        "label": "Sensor range",
+        "symbol": "",
+        "minimum": 1.0, "maximum": 10.0, "step": 0.5, "default": 3.0,
+        "scope": "reset",
+        "explanation": "How far ahead R-5 can see, in metres. The whole "
+                       "difficulty of the room is that this is not 10: an "
+                       "obstacle further off than this is not in the "
+                       "observation at all. Raise it to the room's width and "
+                       "the partial observability disappears.",
+    },
+    "obstacles": {
+        "label": "Security drones",
+        "symbol": "",
+        "minimum": 0, "maximum": 6, "step": 1, "default": 2,
+        "scope": "reset",
+        "explanation": "How many patrolling drones a generated warehouse gets, "
+                       "on average. Each layout draws its own count either "
+                       "side of this, so the quantity varies between episodes "
+                       "as well as the positions.",
+    },
+    "obstacle_variation": {
+        "label": "Drone count variation",
+        "symbol": "",
+        "minimum": 0, "maximum": 3, "step": 1, "default": 1,
+        "scope": "reset",
+        "explanation": "How far the number of drones may vary either side of "
+                       "the setting above, per warehouse. Zero pins every "
+                       "layout to the same count.",
+    },
+    "obstacle_speed": {
+        "label": "Drone speed",
+        "symbol": "",
+        "minimum": 0.1, "maximum": 1.5, "step": 0.05, "default": 0.35,
+        "scope": "reset",
+        "explanation": "How fast the drones patrol, in metres per second. R-5 "
+                       "itself is capped at 1 m/s, so anything above that is "
+                       "traffic it cannot outrun — which is a difficulty "
+                       "setting and not a bug.",
+    },
+    "shelves": {
+        "label": "Storage shelves",
+        "symbol": "",
+        "minimum": 0, "maximum": 8, "step": 1, "default": 3,
+        "scope": "reset",
+        "explanation": "How many solid shelf blocks each warehouse is "
+                       "furnished with. More shelves means tighter corridors "
+                       "and more layouts rejected as unflyable.",
+    },
+    "max_steps": {
+        "label": "Episode length",
+        "symbol": "",
+        "minimum": 100, "maximum": 800, "step": 25, "default": 300,
+        "scope": "reset",
+        "explanation": "How many decisions an episode may last before it times "
+                       "out. One decision is 0.1 s of flight, so 300 is 30 "
+                       "seconds — enough for both stages of the mission.",
+    },
+    "train_layouts": {
+        "label": "Training layouts",
+        "symbol": "",
+        "minimum": 10, "maximum": 400, "step": 10, "default": 120,
+        "scope": "reset",
+        "explanation": "How many different warehouses training draws from. Too "
+                       "few and the agent memorises them; too many and each is "
+                       "seen too rarely to learn anything from.",
+    },
+    "validation_layouts": {
+        "label": "Validation layouts",
+        "symbol": "",
+        "minimum": 5, "maximum": 100, "step": 5, "default": 10,
+        "scope": "reset",
+        "explanation": "How many warehouses are kept back to check parameters "
+                       "against. Measured on, never trained on — and separate "
+                       "from the test pool so that tuning against these does "
+                       "not spend the final score.",
+    },
+    "seed": {
+        "label": "Random seed",
+        "symbol": "",
+        "minimum": 0, "maximum": 999, "step": 1, "default": 0,
+        "scope": "reset",
+        "explanation": "What every random draw in the run starts from — which "
+                       "warehouse comes up when, and which way exploration "
+                       "goes. The same seed reproduces the whole run exactly.",
+    },
+    "test_layouts": {
+        "label": "Unseen test layouts",
+        "symbol": "",
+        "minimum": 5, "maximum": 100, "step": 5, "default": 20,
+        "scope": "reset",
+        "explanation": "How many held-out warehouses the final score is "
+                       "measured on. None of them is ever trained on.",
     },
     "landing_speed": {
         "label": "Landing speed limit",

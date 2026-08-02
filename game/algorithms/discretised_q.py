@@ -117,8 +117,10 @@ class DiscretisedQLearning(Algorithm):
                 if row[action] >= highest - tolerance]
 
     def greedy_action(self, state):
+        # Ties by action order when there is no generator — see the note on
+        # `LinearLearner.greedy_action`.
         tied = self.best_actions(self.bucket(state))
-        if len(tied) == 1:
+        if len(tied) == 1 or self.rng is None:
             return tied[0]
         return self.rng.choice(tied)
 

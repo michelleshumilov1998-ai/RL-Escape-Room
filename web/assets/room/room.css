@@ -34,6 +34,13 @@
 
 .strip-cleared { color: var(--goal); letter-spacing: 0.1em; }
 
+/* The current objective, for a room whose goal changes part-way through.
+   Coloured by stage — cyan for the terminal, green once the way out is the
+   thing to head for — so it matches the marker drawn on the objective itself
+   and the state of the door. */
+.strip-objective { letter-spacing: 0.1em; color: var(--accent); }
+.strip-objective[data-stage="1"] { color: var(--goal); }
+
 /* ---- the route comparison ------------------------------------------- *
    For a room that is *about* a choice, the choice stated as a table.    */
 
@@ -183,4 +190,27 @@
   height: 2px;
   border-radius: 1px;
   flex: none;
+}
+
+/* A recorded episode that began part-way through the mission, at the control
+   terminal, because a share of training episodes do so on purpose. Marked
+   because such an episode opens with the door already unlocked, which reads
+   as a room that has been won rather than one being practised. */
+.episode-tag {
+  font-size: 0.58rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: var(--warn);
+  border: 1px solid color-mix(in srgb, var(--warn), transparent 65%);
+  padding: 0 0.28em;
+  border-radius: 2px;
+}
+
+/* The environment settings in force — room 2's bridge collapse probability.
+   Amber, because it is a difficulty setting rather than a result: it should
+   read as a condition of the run, not as something the agent achieved. */
+.strip-environment {
+  font-family: var(--mono);
+  letter-spacing: 0.08em;
+  color: var(--warn);
 }

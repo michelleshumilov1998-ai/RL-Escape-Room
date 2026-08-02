@@ -212,3 +212,35 @@ body::after {
     transition: none;
   }
 }
+
+/* ---- progress, and the way back to the start ------------------------ *
+   Progress lives in localStorage and survives closing the browser. It used
+   to be entirely invisible, so a restored run read as the game having
+   started in the wrong chamber. Stated here, with a way to start over.   */
+
+.progress-bar {
+  position: fixed;
+  top: clamp(1rem, 3vh, 1.8rem);
+  right: clamp(1rem, 3vw, 2rem);
+  z-index: 5;
+  display: flex;
+  align-items: center;
+  gap: 0.8rem;
+}
+
+.progress-note {
+  margin: 0;
+  font-family: var(--mono);
+  font-size: 0.62rem;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--hairline);
+}
+
+.btn.tiny {
+  font-size: 0.58rem;
+  letter-spacing: 0.16em;
+  padding: 0.6em 1.2em;
+}
+
+.btn.tiny[hidden] { display: none; }

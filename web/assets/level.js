@@ -48,6 +48,7 @@ const dom = {
   algorithmInfo: document.getElementById('algorithm-info'),
   charts: document.getElementById('charts'),
   readout: document.getElementById('readout'),
+  cleared: document.getElementById('cleared'),
 };
 
 /* What this screen plots.
@@ -80,6 +81,9 @@ const ui = {
   // Replay playback, driven here so it runs at one readable rate whatever
   // the training speed was set to.
   replay: { index: 0, elapsed: 0, waiting: 0 },
+  /* The sector-cleared flash, and whether this run has had it. */
+  clearedFlash: null,
+  clearedFlashSeen: false,
   leaving: false,
 };
 
@@ -116,7 +120,7 @@ function refit() {
 
 function buildLegend() {
   dom.legend.innerHTML = '';
-  Renderer.legend().forEach(entry => {
+  Renderer.legend(Sim.describe.layout).forEach(entry => {
     const item = element('li');
 
     // A canvas, not an SVG swatch: the key is drawn by the very code that
@@ -366,7 +370,8 @@ function paint() {
     // rather than a step taken.
     dom.strip.metric.textContent =
       (snapshot.replay.steps.length - 1) + ' steps · ' +
-      snapshot.replay.totalReward.toFixed(0) + ' reward';
+      snapshot.replay.totalReward.toFixed(0) + ' reward'
+      + (currentSlip() ? ' · slipped: the ice overruled the plan' : '');
   } else if (snapshot.metric.value === null
              || snapshot.metric.value === undefined) {
     dom.strip.metric.textContent = '';
@@ -375,6 +380,13 @@ function paint() {
       snapshot.metric.label + ' ' +
       Number(snapshot.metric.value).toFixed(2);
   }
+
+  /* The sector-cleared flash is NOT fired from here. `paint` runs on every
+     snapshot, and the earliest snapshot that reports `solved` is the one where
+     the *plan* converged — long before R-5 has walked anywhere. Firing here put
+     "MISSION COMPLETE" on screen while the robot was still at the start, which
+     is what was reported. It is fired from `announceCleared` instead, when the
+     robot has actually finished its last step onto the panel. */
 
   dom.strip.stale.hidden = !snapshot.stale;
   if (snapshot.stale) {
@@ -467,11 +479,60 @@ function agentPosition() {
 
   if (reduceMotion.matches) return { row: current[0], col: current[1] };
 
+  /* Interpolated only between cells a *step* could join. A teleport pad sends
+     R-5 to the other pad and a beam throws it back to the door it came in by,
+     and gliding smoothly across either drew it travelling through walls it
+     never entered. A jump is instant, so it is drawn instant. */
+  const rows = Math.abs(next[0] - current[0]);
+  const cols = Math.abs(next[1] - current[1]);
+  if (rows + cols > 1) return { row: current[0], col: current[1] };
+
   const share = Math.min(1, ui.replay.elapsed);
   return {
     row: current[0] + (next[0] - current[0]) * share,
     col: current[1] + (next[1] - current[1]) * share,
   };
+}
+
+/**
+ * Whether the step being shown was overruled by the floor.
+ *
+ * The policy arrow is the action the plan *tried*; on ice R-5 slides sideways
+ * instead. With nothing saying so, an arrow pointing right while R-5 goes down
+ * is indistinguishable from a drawing bug — which is how it was reported. The
+ * environment reports it, `recorder.frame` carries it, and this reads it.
+ */
+function currentSlip() {
+  const snapshot = Sim.snapshot;
+  const replay = snapshot && snapshot.replay;
+  if (!replay || snapshot.state !== 'REPLAYING') return false;
+  const frames = replay.steps;
+  const index = Math.min(ui.replay.index, frames.length - 1);
+  return Boolean(frames[index] && frames[index].slipped);
+}
+
+/**
+ * Say the sector is cleared — once, and only once R-5 is actually out.
+ *
+ * The order the player sees, which is the order that was wrong:
+ *
+ *   1. R-5 reaches the final tile
+ *   2. it finishes the movement onto it
+ *   3. the room is complete
+ *   4. and only then the overlay
+ *
+ * `outcome` is the environment's own word for how the run ended, so a plan
+ * that walks into a beam or runs out of steps cannot announce a victory. A
+ * converged plan is not an escape and this no longer treats it as one.
+ */
+function announceCleared(replay) {
+  if (ui.clearedFlashSeen || !ui.clearedFlash) return;
+  if (!replay || replay.outcome !== 'success') return;
+  ui.clearedFlashSeen = true;
+  ui.clearedFlash.show({
+    sector: Sim.describe && Sim.describe.room
+      ? Sim.describe.room.sector : null,
+  });
 }
 
 function advanceReplay(dt) {
@@ -495,6 +556,10 @@ function advanceReplay(dt) {
       ui.replay.index = replay.steps.length - 1;
       ui.replay.elapsed = 0;
       ui.replay.waiting = config.replay_pause_seconds;
+      /* R-5 has just finished its last movement and is standing on the final
+         tile. THIS is the moment the room is complete, and the only correct
+         moment to say so. */
+      announceCleared(replay);
       break;
     }
   }
@@ -613,6 +678,9 @@ function tick(now) {
     showPolicy: true,
     agent: agentPosition(),
     trail: replayTrail(),
+    // Marked on the agent, so the one step where the arrow and the movement
+    // disagree says why.
+    slipped: currentSlip(),
   });
 
   ui.frame = window.requestAnimationFrame(tick);
@@ -712,6 +780,9 @@ dom.reset.addEventListener('click', () => Sim.reset().then(() => {
   ui.previousPolicy = null;
   ui.owed = 0;
   ui.replay = { index: 0, elapsed: 0, waiting: 0 };
+  // A fresh plan has not cleared anything yet, so the flash is owed again.
+  ui.clearedFlashSeen = false;
+  if (ui.clearedFlash) ui.clearedFlash.hide();
   paint();
 }));
 dom.toggle.addEventListener('click', () => setSidebar(!ui.open));
@@ -768,6 +839,11 @@ async function boot() {
   ui.room = roomFromQuery();
   ui.metrics = [];
   ui.previousPolicy = null;
+  // The same flash the room screen uses, so clearing a sector looks the same
+  // wherever it happens. Mounted before the request, so a failure to open the
+  // room cannot leave it unmounted.
+  ui.clearedFlash = window.Cleared.mount(dom.cleared);
+  ui.clearedFlashSeen = false;
 
   // The whole of the start-up is guarded, not only the request. A throw
   // while building the sidebar used to leave the strip reading "Loading"

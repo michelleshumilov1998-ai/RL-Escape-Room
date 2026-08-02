@@ -7,20 +7,101 @@
 <title>PROJECT R-5</title>
 <link rel="stylesheet" href="assets/base.css">
 <link rel="stylesheet" href="assets/start.css">
+<link rel="stylesheet" href="assets/intro.css">
+<link rel="stylesheet" href="assets/about.css">
 </head>
 <body>
 
-<!-- Atmosphere only. It sits behind everything and never takes a click. -->
+<!-- Atmosphere only. It sits behind everything and never takes a click.
+     The robot on it fails at a hazard, gets one hazard further on the next
+     attempt, and finally runs clean — which is the premise, animated. The
+     cinematic below captions it so that reads as learning. -->
 <canvas id="scene" aria-hidden="true"></canvas>
 
+<!--
+  The opening cinematic. Plays once per session and ends by itself after
+  about eleven seconds; the Skip button, any key or a click ends it at once.
+
+  The caption and the Skip button live INSIDE this section on purpose. They
+  were siblings of it, so hiding the section left both of them on screen — a
+  stray "Skip" floating over the main menu for the rest of the visit. Inside
+  it, they go when it goes.
+
+  `hidden` here and visible only once `intro.js` has decided to play: if the
+  script never loads, this stays hidden and the menu below is untouched.
+-->
+<section class="intro" id="intro" hidden aria-label="Opening sequence">
+  <div id="intro-cards"></div>
+  <p id="intro-caption" aria-hidden="true"></p>
+  <!-- The briefing is player-paced: NEXT (or SPACE, ENTER, or a click) moves
+       on, and nothing moves on by itself. The dots say how much is left, so
+       "how long is this" has an answer on screen. -->
+  <div class="intro-foot">
+    <div id="intro-dots" aria-hidden="true"></div>
+    <button type="button" class="btn btn--next" id="intro-next">Next</button>
+  </div>
+  <button type="button" class="btn" id="intro-skip">Skip</button>
+</section>
+
+<!-- The main menu. Visible by default and never hidden by anything except the
+     cinematic while it is actually running — see the note in `intro.css`. -->
 <main class="stage">
   <h1 class="title">Project R-5</h1>
   <div class="actions">
-    <button type="button" class="btn btn--start" id="start">Start</button>
+    <button type="button" class="btn btn--start" id="start">Play</button>
     <button type="button" class="btn btn--about" id="about">About</button>
   </div>
 </main>
 
+<!-- ABOUT: six slides — the premise, then one per sector. Built entirely by
+     `about.js`; the markup is only the frame and the transport. -->
+<section class="about" id="about-panel" hidden
+         role="dialog" aria-modal="true" aria-label="About Project R-5">
+  <div id="about-track"></div>
+  <footer class="about-foot">
+    <button type="button" class="btn" id="about-back">Back</button>
+    <div id="about-dots" role="tablist" aria-label="Slides"></div>
+    <button type="button" class="btn" id="about-next">Next</button>
+    <button type="button" class="btn" id="about-close">Close</button>
+  </footer>
+</section>
+
 <script src="assets/start.js"></script>
+<script src="assets/intro.js"></script>
+<!-- The looping sector previews. Loaded before about.js, which asks for
+     them by name; a failure here costs the pictures and not the words. -->
+<script src="assets/about-preview.js"></script>
+<script src="assets/about.js"></script>
+<script>
+  /* Both overlays are mounted after the scene, because the cinematic reads
+     `window.StartScene` for its caption and the About button asks
+     `window.About` to open. Neither owns any simulation state.
+
+     GUARDED, EACH SEPARATELY, AND THE MENU IS NEVER LEFT BEHIND
+     These two lines used to be bare. A throw in either — a script that failed
+     to load, a stale cache — stopped the other from running and left the main
+     menu invisible, because the menu was hidden by default at the time. It is
+     no longer hidden by default, and on top of that: the two are mounted
+     independently, so ABOUT failing cannot stop the cinematic and the
+     cinematic failing cannot stop ABOUT, and `finally` clears the class that
+     hides the menu whatever happened. */
+  try {
+    window.About.attach(document.getElementById('about-panel'));
+  } catch (problem) {
+    // ABOUT is unavailable; the menu and PLAY are not affected.
+  }
+  try {
+    window.Intro.mount(document.getElementById('intro')).play();
+  } catch (problem) {
+    const intro = document.getElementById('intro');
+    if (intro) intro.hidden = true;
+  } finally {
+    // Belt and braces: whatever happened above, the menu is usable.
+    if (!document.getElementById('intro')
+        || document.getElementById('intro').hidden) {
+      document.body.classList.remove('is-introducing');
+    }
+  }
+</script>
 </body>
 </html>

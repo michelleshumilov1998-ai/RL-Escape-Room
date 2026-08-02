@@ -31,7 +31,7 @@ a different and worse-behaved algorithm; this is the one that works.
 """
 
 from game.algorithms.base import Algorithm
-from game.algorithms.tile_coding import TileCoder
+from game.algorithms.tile_coding import GroupedTileCoder, TileCoder
 
 
 class LinearLearner(Algorithm):
@@ -52,14 +52,38 @@ class LinearLearner(Algorithm):
         self.episode_target = int(parameters.get("episodes", 1500))
 
         self.action_list = env.actions()
-        self.coder = TileCoder(
-            dimensions=4,
-            tilings=int(parameters.get("tilings", 8)),
-            tiles_per_dimension=int(parameters.get("tiles_per_dimension", 6)))
+        tilings = int(parameters.get("tilings", 8))
+
+        # Which coder the room needs, asked of the room rather than assumed.
+        #
+        # Room 4's observation is its four state numbers and one coder over all
+        # four is affordable. Room 5's is fourteen, where a single Cartesian grid
+        # is 6^14 tiles and cannot be built — it declares `OBSERVATION_GROUPS`
+        # and gets a grouped coder instead. Everything below is identical
+        # either way, which is the point of asking.
+        groups = getattr(env, "OBSERVATION_GROUPS", None)
+        if groups:
+            self.coder = GroupedTileCoder(groups, tilings=tilings)
+        else:
+            self.coder = TileCoder(
+                dimensions=4,
+                tilings=tilings,
+                tiles_per_dimension=int(
+                    parameters.get("tiles_per_dimension", 6)))
+
+        # How many separate blocks of weights the room wants, and which one a
+        # state falls in. Room 5 has two — before and after the control
+        # terminal are different tasks with different objectives, and sharing
+        # one set of weights between them would ask a linear model to represent
+        # both with the same features. Rooms without the hook have one block
+        # and are unaffected.
+        self.context_count = int(getattr(env, "context_count", 1))
+        self.block = self.coder.features
+        self.features = self.block * self.context_count
 
         # One weight vector per action. A flat list rather than a dict: it is
         # read several times per step and indexed by integers throughout.
-        self.weights = {action: [0.0] * self.coder.features
+        self.weights = {action: [0.0] * self.features
                         for action in self.action_list}
 
         self.episodes = 0
@@ -74,16 +98,20 @@ class LinearLearner(Algorithm):
     # ------------------------------------------------------------------
 
     def scale(self, state):
-        """The state with every axis mapped into [0, 1].
+        """The observation, with every axis mapped into [0, 1].
 
-        This is the only place that knows what the four numbers mean, and it is
-        why the tile coder does not have to. Position is divided by the room's
-        own size and velocity by its own limit, so the four axes arrive at the
-        coder on the same footing — a tile coder given raw metres beside raw
-        metres per second would cut one axis a hundred times more finely than
-        the other for no reason but the units they happen to be written in.
+        A room that limits what its agent may see owns that decision, so if it
+        offers an `observation` it is used verbatim — room 5's is fourteen numbers
+        of which only three are sensor rays, and it is emphatically *not* its
+        state. Otherwise this is the only place that knows what the four numbers
+        of a flight state mean: position over the room's size, velocity over its
+        limit, so the axes reach the coder on the same footing. A coder handed
+        raw metres beside raw metres per second would cut one axis a hundred
+        times more finely than the other for no reason but the units.
         """
         env = self.env
+        if hasattr(env, "observation"):
+            return env.observation(state)
         return (
             state[0] / env.width,
             state[1] / env.height,
@@ -91,9 +119,19 @@ class LinearLearner(Algorithm):
             (state[3] + env.speed_limit) / (2.0 * env.speed_limit),
         )
 
+    def active_features(self, state):
+        """The feature indices a state switches on, in its own block."""
+        indices = self.coder.active(self.scale(state))
+        if self.context_count == 1:
+            return indices
+        # Shifted into this state's block, so the two stages of room 5's
+        # mission cannot overwrite each other's weights.
+        offset = self.env.context(state) * self.block
+        return [offset + index for index in indices]
+
     def q(self, state, action, active=None):
         if active is None:
-            active = self.coder.active(self.scale(state))
+            active = self.active_features(state)
         weights = self.weights[action]
         total = 0.0
         for index in active:
@@ -102,7 +140,7 @@ class LinearLearner(Algorithm):
 
     def all_q(self, state, active=None):
         if active is None:
-            active = self.coder.active(self.scale(state))
+            active = self.active_features(state)
         return {action: self.q(state, action, active)
                 for action in self.action_list}
 
@@ -121,9 +159,15 @@ class LinearLearner(Algorithm):
 
         This is the primitive the continuous rooms use. A whole-policy table is
         not available here and never will be — see `greedy_policy`.
+
+        Ties are broken randomly when there is a generator to do it with, and
+        by action order when there is not. Reading a policy must not *require*
+        randomness: a session always supplies a generator, but a caller that
+        builds a learner to inspect it has no reason to, and crashing on that
+        turns a missing convenience into a missing method.
         """
         tied = self.best_actions(state)
-        if len(tied) == 1:
+        if len(tied) == 1 or self.rng is None:
             return tied[0]
         return self.rng.choice(tied)
 
@@ -159,13 +203,16 @@ class LinearLearner(Algorithm):
         raise NotImplementedError
 
     def update(self, transition):
-        active = self.coder.active(self.scale(transition.state))
+        active = self.active_features(transition.state)
         before = self.q(transition.state, transition.action, active)
         error = self.target(transition) - before
 
         # The gradient is 1 on each active feature, so the correction is shared
-        # equally between them. See the module docstring on why α is divided.
-        step = self.alpha / self.coder.tilings * error
+        # equally between them. Divided by how many are active rather than by
+        # the tiling count, because a grouped coder switches on `tilings` per
+        # group: dividing by `tilings` alone would multiply the effective step
+        # size by the number of groups. See the module docstring.
+        step = self.alpha / len(active) * error if active else 0.0
         weights = self.weights[transition.action]
         for index in active:
             weights[index] += step
@@ -206,7 +253,7 @@ class LinearLearner(Algorithm):
             "meanAbsQ": self.mean_absolute_error(),
             "converged": self.finished,
             "startValue": max(self.all_q(self.env.start_state()).values()),
-            "features": self.coder.features,
+            "features": self.features,
             "tilings": self.coder.tilings,
         }
 

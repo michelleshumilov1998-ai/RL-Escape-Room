@@ -42,6 +42,28 @@ select can name them, with `built` false until they exist.
 #   D  a one-way door: it may be entered going down and no other way
 #
 #        c0 c1 c2 c3 c4 c5 c6 c7 c8 c9
+# WHERE THE ICE IS, AND WHY IT MOVED
+# It used to sit at (1,1) and (2,1) with cracked ice at (6,5) — all three
+# *beside* the route rather than on it. Measured: at every slip setting the plan
+# walked S → (0,1) → (0,2) → (1,2) → (2,2) → the pad, then out of the far pad
+# along r6 c3–c4 and down to the panel, eleven steps, crossing ice zero times.
+# So the room's central mechanic never appeared in the answer, and the only time
+# a player saw a slip was during exploration — where an arrow pointing one way
+# and a robot going another reads as a rendering fault rather than as the floor.
+#
+# The ice is now on the route the plan actually takes, in the two places the
+# route cannot avoid:
+#
+#   r6 c3–c4   the corridor out of the second teleport pad. The only way off
+#              that pad, and a sideways slip there goes up into the beam at
+#              (5,3) — which throws R-5 back to the start. Slipping here is
+#              expensive without being a lottery.
+#   r8 c4–c5   the final approach, directly above the panel, plus r9 c6 so the
+#              approach cannot simply be taken from the east instead. A slip
+#              here costs a step or two and nothing worse, which is what makes
+#              the last stride a matter of grip rather than of luck.
+#
+#        c0 c1 c2 c3 c4 c5 c6 c7 c8 c9
 ROOM1_GRID = [
     "S..#..B...",   # r0  start, wall, battery
     ".~.#.###..",   # r1  weak ice and scattered walls
@@ -49,10 +71,10 @@ ROOM1_GRID = [
     ".L.LL..#..",   # r3  separated laser hazards
     "...#..o...",   # r4  oil in an important junction
     "##.L###...",   # r5  central barrier with a dangerous crossing
-    "..T..=....",   # r6  second teleporter and strong ice
+    "..T~~=....",   # r6  second teleporter, and the icy corridor out of it
     ".###.D.##.",   # r7  one-way door toward the lower section
-    "...o......",   # r8  oil near the final approach
-    "....#E....",   # r9  control panel / exit
+    "...o~~....",   # r8  oil, then ice on the final approach
+    "....#E~...",   # r9  control panel / exit, iced from the east too
 ]
 
 ROOM1 = {
@@ -137,45 +159,65 @@ ROOM1 = {
 # Room 2 — the Broken Bridge Sector
 # ----------------------------------------------------------------------
 #
-# A shaft through the middle of the sector, and two ways round it.
+# A sealed void through the middle of the sector, and two ways round it.
 #
 #   the span    7 steps along the bottom: two sound bridge sections with four
 #               collapsing planks between them. Every plank has a chance of
 #               giving way under the step that lands on it, and that is a
 #               fall. Crossed cleanly it is worth +93.
-#   the lap     21 steps: up the west wall, along the safe corridor at the
-#               top, down the east wall. Nothing on it can drop the agent.
-#               Worth +79.
+#   the lap     21 steps: up the west wall, along the corridor at the top,
+#               down the east wall. Nothing on it can drop the agent, but
+#               four cells of the top corridor are iced, so it is not free
+#               of chance either. Worth +79.
 #
-# WHERE THE RISK IS, AND WHY IT IS THERE RATHER THAN ANYWHERE ELSE
+# WHERE THE RISK IS
 # A plank fails under the step that arrives on it, so the danger is the
 # crossing itself and it compounds: four planks at chance p get across with
-# probability (1-p)^4. At the default 0.10 that is about two attempts in
-# three. Survive a plank and it is gone behind you, so the span cannot be
-# walked back — a step returning onto a gap is the same fall.
+# probability (1-p)^4. At 0.10 that is about two attempts in three. Survive a
+# plank and it is gone behind you, so the span cannot be walked back — a step
+# returning onto a gap is the same fall. Which plank has already gone is part
+# of the state, so the agent is never asked to average "fine" with "fatal".
 #
-# That gives the room two different reasons to fear the span, which is the
-# point of it. The first is the plank failing, which no policy can avoid. The
-# second is the exploratory step: every cell of the span has the shaft
-# directly above it, so a random step upwards is fatal, and stepping back is
-# fatal once a plank has gone. A method that prices the route it would walk
-# perfectly sees only the first. A method that prices the route it is
-# actually walking pays for both.
+# THE MARGIN, AND WHAT IT BUYS
+# The span is 14 ahead of the lap when it works (+93 against +79). That margin
+# cannot pay for a -100 fall across four compounding planks, so the collapse
+# slider moves the learned route only at the very bottom of its range:
+# measured, SARSA takes the span at 0.00 and the lap from 0.05 upward. The
+# room still trains and still escapes at every setting.
 #
-# THE MARGIN
-# The span is 14 ahead of the lap when it works (+93 against +79), which has
-# to be wide enough that the plank risk alone does not close it, or every
-# method takes the lap and the room demonstrates nothing:
+# This is the documented design, restored. An earlier pass here widened the
+# margin (step -4, hazard -40, two planks) so the route would flip across a
+# 30-50% band. That was tuning, not compliance — the assignment fixes the grid
+# size, SARSA and an unknown model, and says nothing about reward magnitudes —
+# and it put the code out of step with the README. The narrower, documented
+# numbers are what ship.
 #
-#     plank risk  <  14  <  plank risk + exploration cost
+# WHAT IS ABOVE THE SPAN
+# The middle of the sector is walled off on three sides and open only downward
+# onto the planks: a dead-end maintenance void. A step up off a plank is legal
+# and costs -1, and leads nowhere. It is not a hazard, and the room's text no
+# longer claims otherwise.
 #
-# The failure chance is a slider, so the point where that stops holding can
-# be found rather than taken on trust.
+# THE ICE
+# The assignment calls for several slippery cells here, and there are four,
+# on the top corridor of the lap. They are there rather than on the span
+# because placement was measured, not argued: ice on the planks lets the
+# agent slip clear of the cell it aimed at, which made the span the learned
+# route at every collapse setting and inverted the room's whole lesson. Ice
+# on the lap leaves every route decision exactly as it was without it —
+# span at 0.00, lap from 0.05 up — while making the safe way round genuinely
+# stochastic, which is what SARSA is here to price.
+#
+# Nothing beside that corridor is fatal: the middle is walled off, so a slip
+# is a bump into stone at -2, never a fall.
+#
+# 'C' is the collapsing tile; 'G' the sound bridge sections either side;
+# '~' the ice.
 #
 #        c0 c1 c2 c3 c4 c5 c6 c7 c8 c9
 ROOM2_GRID = [
     "##########",
-    "#........#",
+    "#..~~~~..#",
     "#.######.#",
     "#.#....#.#",
     "#.#....#.#",
@@ -194,6 +236,24 @@ ROOM2 = {
     "sector": "LAB SECTOR B-04",
     "grid": ROOM2_GRID,
 
+    # RESTORED TO THE DOCUMENTED NUMBERS
+    #
+    # These were changed to step -4 / hazard -40 with two planks, to make the
+    # span a live decision across a 30-50% collapse band. That was tuning, not
+    # compliance: the assignment fixes the grid size, SARSA and an unknown
+    # model, and says nothing about reward magnitudes. It also put the code out
+    # of step with the README, which documents +93 against +79 and a -101 fall.
+    #
+    # So the simplest implementation that satisfies the assignment is the
+    # documented one, and that is what is here.
+    #
+    # WHAT THAT COSTS, STATED PLAINLY
+    # On these numbers the span is worth taking only when the collapse chance
+    # is very near zero: a 14-point margin (+93 against +79) cannot pay for a
+    # 100-point fall, and with four planks a 30% chance leaves 24% survival.
+    # The slider therefore moves the policy only at the very bottom of its
+    # range. That is a property of the documented design, not a defect
+    # introduced here, and it is left alone because changing it is a redesign.
     "rewards": {"step": -1.0, "wall": -2.0, "hazard": -100.0, "goal": 100.0},
 
     # The assignment fixes SARSA here. The others are offered because this
@@ -203,12 +263,14 @@ ROOM2 = {
                    "double_q_learning"],
     "algorithm_default": "sarsa",
 
-    # No `slip` here: there is not a loose tile in this sector, so the control
-    # would move nothing. The risk in this room is the planks, and that has a
-    # control of its own.
+    # Two sources of chance, and a control for each: the ice on the lap and
+    # the planks on the span.
     "parameters": ["alpha", "gamma", "epsilon", "epsilon_min",
-                   "epsilon_decay", "collapse_chance", "q_init", "episodes"],
+                   "epsilon_decay", "slip", "collapse_chance", "q_init",
+                   "episodes"],
 
+    # Optimistic initialisation, as documented: above the best return the
+    # room can pay, so every action is tried before one is settled on.
     "parameter_defaults": {"q_init": 90.0},
 
     "metric": {"key": "meanReward", "label": "Mean reward", "format": "%.1f"},
@@ -222,16 +284,17 @@ ROOM2 = {
                      "given: the only way to find out what a step does is to "
                      "take it.",
         "obstacles": [
-            "A shaft fills the middle of the sector. Entering it anywhere "
-            "ends the run.",
+            "The corridor along the top of the lap is iced. A step on it "
+            "can carry the agent sideways instead of where it aimed.",
             "The span along the bottom is the short way across: two sound "
             "bridge sections with four collapsing planks between them.",
             "A plank can give way under the step that lands on it, and that "
             "is a fall. Four of them in a row, so the risk compounds.",
             "Survive a plank and it is gone behind you — the span cannot be "
             "walked back, and a step returning onto a gap is the same fall.",
-            "Every cell of the span has the shaft directly above it, so one "
-            "exploratory step upwards ends the run wherever you are on it.",
+            "Above the planks is a sealed maintenance void, open only "
+            "downwards onto the span. Stepping up into it costs a step and "
+            "leads nowhere.",
         ],
         "actions": "Up, down, left, right. Nothing else.",
         # This room is *about* the choice between these two, so it is stated
@@ -239,21 +302,20 @@ ROOM2 = {
         # flawless walk earns; the margin between them is the whole design.
         "routes": [
             {"name": "The span", "steps": 7, "best": 93,
-             "risk": "Four planks that can give way, and the shaft above "
-                     "every step of it."},
+             "risk": "Four planks in a row, each able to give way under "
+                     "the step that lands on it."},
             {"name": "The lap", "steps": 21, "best": 79,
              "risk": "None. Nothing on it can drop the agent."},
         ],
         "rewards": [
             ["Each step", "-1"],
             ["Walking into a wall", "-1 + (-2) = -3"],
-            ["Falling into the shaft", "-1 + (-100) = -101"],
             ["A plank giving way underfoot", "-1 + (-100) = -101"],
             ["Reaching the exit", "-1 + 100 = +99"],
         ],
-        "termination": "The run ends at the exit door, in the shaft, or under "
-                       "a plank that gave way, and otherwise when the step "
-                       "limit is reached.",
+        "termination": "The run ends at the exit door, under a plank that "
+                       "gave way, and otherwise when the step limit is "
+                       "reached.",
         "note": "The span pays more than the lap when it works: +93 against "
                 "+79. So a method that learns the value of behaving perfectly "
                 "has every reason to take it, and one that learns the value "
@@ -457,8 +519,9 @@ ROOM4 = {
     "key": "room4",
     "number": 4,
     "built": True,
-    "name": "Drone Test Chamber",
+    "name": "Drone Wind Tunnel",
     "sector": "LAB SECTOR D-07",
+    "subtitle": "FLIGHT STABILISATION TEST",
 
     # This room is built on the continuous world rather than the grid.
     "world": "drone",
@@ -496,6 +559,21 @@ ROOM4 = {
         # towards the pad is made against it.
         {"id": "wind1", "type": "wind", "x": 3.6, "y": 2.6,
          "width": 3.0, "height": 3.0, "wind": (0.0, 1.4)},
+        # A second bank, wide and shallow, across the bottom right — and the
+        # reason it is there is that the first one was not in the way.
+        #
+        # The route the agent actually learns runs right along the floor and
+        # then climbs the east wall, which passes nowhere near the top-left
+        # band; the chamber was solvable without ever meeting a fan. This one
+        # sits exactly on the corner of that L, so the turn upwards is made
+        # into a downdraught and the climb has to be flown rather than
+        # coasted. Its fans stand in a row along its top edge, which is what
+        # `_fans_for` does with a band that blows down.
+        #
+        # 1.1 m/s² against 3.0 m/s² of thrust: enough to be a real hurdle,
+        # and well short of pinning the drone to the floor. Measured below.
+        {"id": "wind2", "type": "wind", "x": 7.6, "y": 7.8,
+         "width": 3.6, "height": 1.6, "wind": (0.0, 1.1)},
         # Thick air: costs time, and makes arriving slowly much easier. The
         # trade this room is built around is that it is not on the short way.
         {"id": "slow1", "type": "slow", "x": 7.6, "y": 5.4,
@@ -541,28 +619,60 @@ ROOM4 = {
     # only once the agent is competent enough to be worth watching.
     "max_steps": 1800,
 
+    # How many environment steps of this room are worth one step of the
+    # interface's speed tiers.
+    #
+    # The tiers are "steps per second", and that unit does not mean the same
+    # thing here as it does in a grid room. One step in rooms 1 to 3 moves the
+    # agent a whole cell — a tenth of the room. One step here is 0.02 s of
+    # flight, so at the speed cap it moves 0.02 m: a five-hundredth of the
+    # chamber. Measured at the "Normal" tier of 9 steps a second, that is
+    # 11 pixels a second and 56 seconds to cross the chamber, against 569
+    # pixels a second for a grid agent on the same tier. It reads as a drone
+    # that does not move at all, which is exactly how it was reported.
+    #
+    # 12 puts Normal at about 4.6 seconds to cross under full thrust and Slow
+    # at about 14, which is the pace the grid rooms feel like. Full
+    # distance-parity with a grid step would be 50 — one tier-step per world
+    # unit — and crosses the chamber in a second, too fast to watch the
+    # control that this room is about.
+    #
+    # The same mismatch, in the replay rather than the live view, is what
+    # `playback.stepsPerSecond` in `definition.py` already exists to fix.
+    "live_step_scale": 12,
+
     "metric": {"key": "meanReward", "label": "Mean reward", "format": "%.1f"},
     "episode_metric": "reward",
     "comparison": True,
 
     "info": {
-        "objective": "Fly R-5's drone frame to the landing pad and set it "
-                     "down gently. Reaching the pad is not enough: arriving "
-                     "faster than the landing speed on either axis is a crash.",
+        "story": "With the reactor back up, R-5 finds the ground corridor to "
+                 "the final sector collapsed. The only way on is through the "
+                 "aerospace bay: it couples itself to an experimental drone "
+                 "frame and lifts off the launch platform into the wind "
+                 "tunnel.",
+        "objective": "Fly the drone frame across the tunnel and set it down on "
+                     "the landing platform. Reaching the platform is not "
+                     "enough — arriving faster than the landing speed on "
+                     "either axis is a crash, not a landing.",
         "obstacles": [
             "There is no grid. The drone moves continuously and is steered by "
             "thrust, so an action changes where it is going rather than where "
             "it is — and it is felt several steps later.",
-            "Speed is capped at 1 m/s on each axis, and the chamber is 10 m "
+            "Speed is capped at 1 m/s on each axis, and the tunnel is 10 m "
             "across, so crossing it takes hundreds of 0.02 s steps.",
-            "Touching a wall or a pillar ends the run.",
-            "A wind band across the top left blows downwards, against the "
-            "last part of the approach.",
-            "A patch of thick air on the right costs time but makes a slow "
-            "arrival much easier. It is not on the short way.",
-            "A thruster overcharge on the left doubles the push and shortens "
-            "the route, at 5 to enter — and it is far harder to arrive slowly "
-            "out of it.",
+            "The chamber wall and the turbine housings are solid. Touching "
+            "either ends the run.",
+            "A bank of ventilation fans drives air down through the middle of "
+            "the tunnel, across the last part of the approach.",
+            "A second bank, wide and shallow, drives air down across the "
+            "bottom right — directly over the turn from the floor onto the "
+            "climb, so the climb has to be flown into a downdraught.",
+            "A stabilisation field on the right is dense air: it costs time "
+            "and makes a gentle arrival far easier. It is not on the short way.",
+            "A thruster overcharge field on the left doubles the push and "
+            "shortens the route, at 5 to enter — and it is much harder to "
+            "arrive slowly out of it.",
         ],
         "actions": "Hold, or thrust up, down, left or right. Thrust is an "
                    "acceleration, not a move: nothing here steps from one "
@@ -594,18 +704,370 @@ ROOM4 = {
 }
 
 # ----------------------------------------------------------------------
+# Room 5 — the Adaptive Storage Facility
+# ----------------------------------------------------------------------
+#
+# The final chamber, and the only one that is not a chamber: it is a *pool* of
+# warehouses, and the agent gets a different one every episode.
+#
+# WHAT MAKES IT THE LAST ROOM
+# Rooms 1 to 4 each have one layout. However hard they are, an agent that
+# memorises the one map has solved them, and nothing it learns has to be worth
+# anything anywhere else. Here the shelves move between episodes, the traffic
+# patrols different routes, and the score that counts is measured on layouts
+# that were never trained on. A memorised route is worth nothing by
+# construction.
+#
+#     state       (x, y, vx, vy, stage, phase)   — what the world knows
+#     observation 14 numbers, three of them range-limited sensor rays and one
+#                 pair describing the nearest obstacle that passes the
+#                 visibility rule            — what the agent knows
+#
+# The gap between those two lines is the room. See `game/warehouse.py`.
+#
+# WHAT COUNTS AS SEEING SOMETHING
+# An obstacle is visible when the distance from the CENTRE of the agent to the
+# CENTRE of the obstacle is at most `sensor_range` metres AND the obstacle's
+# centre lies inside the forward cone of half-angle `sensor_spread`. Centre to
+# centre exactly: the obstacle's radius is never subtracted from the range
+# first. The rule lives in one method — `WarehouseWorld.visible_obstacles` —
+# and the observation, the ray solver and the drawing all go through it.
+#
+# THE MISSION IS IN TWO STAGES
+# The blast door is shut until the control terminal has been reached, so the
+# room cannot be finished by flying at the exit. Stage 0 is "find the
+# terminal", stage 1 is "now leave", and the two get separate blocks of weights
+# because they are different tasks with different objectives.
+#
+# THE SPLIT IS THE MEASUREMENT
+# Three disjoint pools of seeds. Training samples from the first, and the
+# numbers that matter come from the third — which no episode ever trains on.
+# `WarehouseWorld` raises if they overlap, because a test layout that was
+# trained on is not an unseen layout and reporting it as one would be the
+# single most misleading thing this project could do.
+
+ROOM5 = {
+    "key": "room5",
+    "number": 5,
+    "built": True,
+    "name": "Adaptive Storage Facility",
+    "sector": "LAB SECTOR E-12",
+    "subtitle": "AUTONOMOUS GENERALISATION TEST",
+
+    "world": "warehouse",
+
+    # The last chamber there is. The room screen reads this to know that
+    # escaping here ends the story rather than unlocking the next door, and
+    # shows the ending sequence instead of returning to the chamber select.
+    # A flag on the room rather than a number compared in the interface, so
+    # "which room is last" stays a fact about the rooms.
+    "final": True,
+
+    "size": (10.0, 10.0),
+    "dt": 0.02,
+    # Room 4's flight model, unchanged in kind — R-5 stays in the drone frame,
+    # which is both the narrative continuity and the reason the physics is
+    # already known to work.
+    "thrust": 3.0,
+    "drag": 0.7,
+    "speed_limit": 1.0,
+    # How close counts as reaching an objective. Generous on purpose: measured
+    # below, a naive direct-to-target controller escaped 1 layout in 12 at the
+    # original 0.55, and a room whose objective a perfect controller misses is
+    # not a hard room.
+    "reach": 0.85,
+
+    # How far the sensors see, in metres. The room's central parameter: the
+    # whole difficulty is that this is not 10.
+    "sensor_range_default": 3.0,
+    "sensor_spread": 0.55,
+
+    # How much furniture a generated warehouse gets.
+    #
+    # Cut from 4 shelves and 3 carts, against measurement. A direct-to-target
+    # controller — which is roughly the best a reactive linear policy can hope
+    # to become — escaped only 1 of 12 layouts at the old defaults, dying on a
+    # shelf almost every time. A default the required agent cannot solve is not
+    # a difficulty setting, it is a broken room. The sliders go up from here.
+    "shelves": 3,
+    "obstacles_default": 2,
+    # Two diagonal beams, as in room 1. Kept to two for the same reason the
+    # drones are: the room has to stay readable.
+    "lasers": 2,
+
+    # In METRES PER SECOND, and a real speed rather than the multiplier it used
+    # to be. Measured before this changed: the drones patrolled at between 2.3
+    # and 6.2 m/s against a drone capped at 1.0, and once a lap they jumped
+    # 2.2 m in a single 0.02 s tick. Nothing a policy could learn would avoid
+    # that, and the 92% collision rate said so.
+    #
+    # 0.35 m/s is roughly a third of R-5's top speed: slow enough to watch a
+    # circuit and time a crossing, quick enough that the timing is a real
+    # constraint. A drone crosses its own width in about 1.4 seconds.
+    "obstacle_speed_default": 0.35,
+
+    # How much the number of drones varies between warehouses, either side of
+    # the setting above. The assignment requires the *quantity* to be dynamic
+    # and not only the positions, so at the default each layout draws one, two
+    # or three of them. 0 pins it, which is what makes the variation testable
+    # in both directions.
+    "obstacle_variation": 1,
+
+    # The three pools, as [from, to) ranges. Disjoint, and checked on build.
+    # 120 training layouts, not 40. Measured: the generalisation gap closes
+    # monotonically as the training pool grows, and at 40 the agent was plainly
+    # memorising them.
+    #
+    #     layouts   train escape   test escape   gap
+    #        10          20%            5%       +15
+    #        40          30%            5%       +25
+    #       120          18%           10%        +8
+    #       300           5%           10%        -5
+    #
+    # At 300 the gap inverts — test beats train — which is what a policy that
+    # has stopped memorising looks like, but each layout is then seen so few
+    # times that both numbers fall. 120 is where variety is enough to transfer
+    # and each warehouse is still seen often enough to learn from.
+    "train_seeds": (1000, 1120),
+    "validation_seeds": (2000, 2010),
+    "test_seeds": (3000, 3020),
+
+    # Per tick of physics, not per decision, so the step cost does not change
+    # if `action_repeat` does.
+    #
+    # THE NUMBERS ARE SET SO THAT TRYING BEATS STANDING STILL
+    # The first version had no timeout penalty at all, and it taught the agent
+    # to hover. Worked out arithmetically, on the old numbers:
+    #
+    #     hover the whole episode      -30.0
+    #     set off and crash halfway    -88.0
+    #     complete the mission        +302.0
+    #
+    # Hovering beat crashing by 58, so an agent that could not yet complete the
+    # mission was *correct* to stand still, and epsilon-greedy over 300
+    # decisions essentially never stumbles through the whole mission to find
+    # the +302. It was a reward-design bug wearing the costume of an algorithm
+    # bug: 0% terminal, 5% collisions, and a policy that had learned to survive
+    # by not moving.
+    #
+    # On these numbers:
+    #
+    #     hover the whole episode     -110.0   (step cost plus the timeout)
+    #     set off and crash halfway    -48.0
+    #     complete the mission        +382.0
+    #
+    # so setting off is worth more than standing still even when the chance of
+    # success is zero, which is what gives exploration somewhere to start from.
+    # Collisions are still much the worst thing that can happen on the way.
+    "rewards": {"step": -0.02, "progress": 4.0, "static": -50.0,
+                "dynamic": -60.0, "boundary": -50.0, "terminal": 80.0,
+                "locked": -5.0, "goal": 250.0, "timeout": -80.0,
+                "laser": -60.0},
+
+    # The assignment asks for feature-based approximation here, and semi-
+    # gradient Q-Learning is what it names. Both are offered: this room is a
+    # far better test of the on-policy/off-policy difference than room 2's map
+    # managed, because a cart really does kill and exploration really does
+    # reach one.
+    "algorithms": ["semi_gradient_q", "semi_gradient_sarsa"],
+    "algorithm_default": "semi_gradient_q",
+
+    # Everything the assignment asks to be under the user's control, in three
+    # groups: the learning method, the run, and the warehouse itself.
+    "parameters": [
+        # the method
+        "alpha", "gamma", "epsilon", "epsilon_min", "epsilon_decay", "tilings",
+        # the run
+        "episodes", "max_steps", "seed",
+        # the warehouse
+        "sensor_range", "obstacles", "obstacle_variation", "obstacle_speed",
+        "shelves",
+        # the split
+        "train_layouts", "validation_layouts", "test_layouts",
+    ],
+
+    # gamma 0.95, not 0.99. Measured: at 0.99 semi-gradient Q-Learning diverges
+    # here exactly as it does in room 4 — Q(start) reached +1200 against a true
+    # value of at most ~250, the weight norm passed 3600 and the mean |TD error|
+    # was 67. At 0.95 it is stable (Q(start) ~10, |TD| ~1). Off-policy
+    # bootstrapping with an approximator has no convergence guarantee, and this
+    # is the room's second demonstration of it.
+    "parameter_defaults": {"gamma": 0.97, "alpha": 0.20, "epsilon_min": 0.05,
+                           "epsilon_decay": 0.9985, "episodes": 4000},
+
+    # One decision every five ticks of physics — 0.1 s. See `WarehouseWorld.step`
+    # for the measurement that forced it.
+    "action_repeat": 10,
+
+    # A share of training episodes start at the terminal in stage 1, so the
+    # second half of the mission gets practised instead of starving. Training
+    # only — evaluation always starts at the real start with the door shut.
+    # See `WarehouseWorld.reset`.
+    "stage_one_share": 0.4,
+
+    # In *decisions*, so 300 of them is 3000 ticks and 30 seconds of flight.
+    "max_steps": 300,
+
+    # ------------------------------------------------------------------
+    # HOW FAST THIS ROOM IS *WATCHED*. Neither number touches the physics.
+    # ------------------------------------------------------------------
+    #
+    # A recorded frame here is one decision — `action_repeat` ticks of dt —
+    # which is 10 * 0.02 = 0.2 seconds of flight. So replaying at N frames a
+    # second shows the flight at N * 0.2 times real speed, and the honest
+    # figure for real time is 1 / 0.2 = 5.
+    #
+    # It was inheriting the shared 50, which is right for room 4 (whose frame
+    # is one tick, so 50 a second is real time) and ten times too fast here.
+    # Measured on a 1440x900 window: R-5 crossed the warehouse at about 830
+    # pixels a second, which is faster than the eye tracks — the direction it
+    # chose, the obstacle it dodged and the moment it reached the terminal all
+    # went past in well under a second.
+    #
+    # 5.0 is exactly real time: R-5 at its 1 m/s cap crosses the 10 m warehouse
+    # in ten seconds, at about 83 pixels a second on the same window. The speed
+    # chips scale it from there, so Slow is a third of that and Fast about three
+    # times it.
+    "replay_steps_per_second": 5.0,
+
+    # How many decisions one unit of the interface's speed tiers is worth while
+    # training is being watched. At the Normal tier of 9, a scale of 1 gives 9
+    # decisions a second — 1.8 times real time, which still reads clearly and
+    # keeps a watched run making visible progress. It was 3, which put live
+    # training at 5.4 times real speed.
+    #
+    # Turbo is unaffected by either number and remains the way to train a full
+    # run quickly; these two are only about what can be followed by eye.
+    "live_step_scale": 1,
+
+    # How often training stops to measure the frozen policy on held-out
+    # layouts, and over how many of them. This is what draws the train /
+    # validation / unseen-test curve the assignment asks for; no weight is
+    # updated by it — see `Session._checkpoint`. Eight layouts is noisy per
+    # point and cheap enough to take sixteen times over a run, which is the
+    # right trade for a trend line.
+    "checkpoint_every": 250,
+    "checkpoint_layouts": 8,
+
+    # Fewer than the shared 40. A frame here carries every shelf, drone, beam
+    # and beacon in a generated warehouse plus the sensor detail, and an
+    # episode is up to 300 of them — measured at 40 episodes the batch came to
+    # 3.2 MB, which the screen then refetched every two seconds during
+    # training. 24 is enough to browse and a third of the weight.
+    "episodes_recorded": 24,
+
+    # The graphs this room puts up, in order. Read by `definition.build` and
+    # drawn by `charts.js`; a room that names none gets the shared four.
+    #
+    # The 0/1 series are rates: each chart draws the raw series faintly and a
+    # rolling average over it in the accent colour, so an indicator that is 1
+    # on escapes and 0 otherwise becomes an escape *rate* without anything
+    # having to smooth it first.
+    "charts": [
+        {"key": "reward", "label": "Reward per episode (with moving average)"},
+        {"key": "steps", "label": "Episode length"},
+        {"key": "success", "label": "Complete escape rate"},
+        {"key": "terminalReached", "label": "Terminal activation rate"},
+        {"key": "collision", "label": "Collision rate"},
+        {"key": "timeout", "label": "Timeout rate"},
+        {"key": "epsilon", "label": "Exploration rate ε"},
+        {"key": "convergence", "label": "Mean |TD error|"},
+        {"key": "weightNorm", "label": "Weight norm ‖w‖"},
+        # The one series that does not come from the training episodes: three
+        # lines from the periodic held-out checkpoints.
+        {"keys": ["train", "validation", "test"], "source": "checkpoints",
+         "x": "episode",
+         "label": "Escape rate — train vs validation vs unseen test"},
+    ],
+
+    "metric": {"key": "meanReward", "label": "Mean reward", "format": "%.1f"},
+    "episode_metric": "reward",
+    "comparison": True,
+
+    # What the screen calls the objective at each mission stage, indexed by
+    # `stage`. Kept here rather than in the interface for the same reason every
+    # other word about a room is: the room owns what it is asking for, and a
+    # screen that wrote these itself would be free to disagree with the state
+    # the environment is actually rewarding against.
+    "objectives": ["OBJECTIVE: REACH CONTROL TERMINAL",
+                   "OBJECTIVE: REACH UNLOCKED EXIT"],
+
+    "info": {
+        "story": "Past the wind tunnel is the last sector: an automated store "
+                 "that rearranges itself between missions. The laboratory "
+                 "built it to settle one question — whether R-5 learned to "
+                 "adapt, or only memorised four rooms.",
+        "objective": "Reach the central control terminal to disarm the "
+                     "adaptive security system, then leave through the blast "
+                     "door. The door is shut until the terminal is reached.",
+        "obstacles": [
+            "The warehouse is different every episode. The shelves move, the "
+            "objectives move, the number of security drones changes, and the "
+            "route that worked last time is not the route this time.",
+            "R-5 cannot see the map. It has a forward sensor cone — three "
+            "rays reaching the sensor range and no further — so an obstacle "
+            "behind a shelf, or simply off to one side, does not exist until "
+            "it does.",
+            "A security drone is visible only when its centre is within the "
+            "sensor range of R-5's centre AND inside that forward cone. "
+            "Nothing outside both is in the observation at all.",
+            "Security drones are half a metre wide and patrol closed square "
+            "circuits at about a third of R-5's top speed. Touching one ends "
+            "the run.",
+            "Two diagonal security beams cut across the floor while the "
+            "system is armed. They go dark the moment the terminal is "
+            "reached, which is what disarming it means.",
+            "The storage shelves are solid, and so is the chamber wall.",
+            "The blast door does not open until the terminal has been "
+            "reached, and trying it early costs something.",
+        ],
+        "actions": "Hold, or thrust up, down, left or right — the same drone "
+                   "frame as the wind tunnel. Thrust is an acceleration, not "
+                   "a move.",
+        # These figures are the `rewards` table above, written out. They were
+        # wrong in every row for a while — the table said 80 and this said 50 —
+        # which is worse than saying nothing, because the sidebar is where
+        # anyone reads the rules from.
+        "rewards": [
+            ["Each step", "-0.02"],
+            ["Closing on the current objective", "+4 per metre closed"],
+            ["Drifting away from it", "-4 per metre lost"],
+            ["Reaching the control terminal", "+80, once and once only"],
+            ["Trying the blast door while it is locked", "-5"],
+            ["Hitting a shelf", "-50"],
+            ["Hitting the chamber wall", "-50"],
+            ["Hitting a security drone", "-60"],
+            ["Touching an armed security beam", "-60"],
+            ["Running out of time", "-80"],
+            ["Escaping through the blast door", "+250"],
+        ],
+        "termination": "The run ends on an escape, on any collision, and on "
+                       "running out of time — which is charged for, so that "
+                       "hovering is the worst outcome rather than the safest.",
+        "note": "This room measures generalisation, not skill at one map. "
+                "Training samples 120 warehouse layouts; the score that counts "
+                "is measured on 20 more that were never trained on, and the "
+                "two pools are checked to be disjoint. The agent is given "
+                "fourteen numbers — where it is, how fast, the direction and "
+                "distance to its objective, three range-limited sensor rays, "
+                "and how near the closest visible drone is and how fast it is "
+                "closing — and never the layout. Two different warehouses can "
+                "produce identical numbers, so the observation is not Markov "
+                "even though the world is: that is partial observability, and "
+                "it is why a linear model over local features can transfer "
+                "between layouts at all.",
+    },
+}
+
+# ----------------------------------------------------------------------
 # The rest, named but not built
 # ----------------------------------------------------------------------
 
-PLACEHOLDERS = [
-    {"key": "room5", "number": 5, "built": False,
-     "name": "Adaptive Storage Facility", "sector": "LAB SECTOR E-12",
-     "algorithms": ["semi_gradient_sarsa"],
-     "algorithm_default": "semi_gradient_sarsa"},
-]
+PLACEHOLDERS = []
 
 ROOMS = {ROOM1["number"]: ROOM1, ROOM2["number"]: ROOM2,
-         ROOM3["number"]: ROOM3, ROOM4["number"]: ROOM4}
+         ROOM3["number"]: ROOM3, ROOM4["number"]: ROOM4,
+         ROOM5["number"]: ROOM5}
 for placeholder in PLACEHOLDERS:
     ROOMS[placeholder["number"]] = placeholder
 

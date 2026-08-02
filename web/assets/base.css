@@ -23,6 +23,11 @@
 
   --goal: #32E875;
   --hazard: #FF3B5C;
+  /* Amber: the middle of the three sensor states in room 5 — something is
+     in range but not yet a collision risk. The palette had no step between
+     "clear" and "fatal", and a sensor that jumped straight from cyan to red
+     could not show a hazard being noticed and avoided. */
+  --warn: #FFB020;
 
   /* Derived, not new: tints and washes of the above. */
   --title: color-mix(in srgb, var(--muted), #FFFFFF 30%);
@@ -169,6 +174,33 @@ body {
   background: color-mix(in srgb, var(--base) 86%, var(--muted));
   border: 1px solid var(--hairline-faint);
 }
+
+/* The key under a chart that draws more than one line. Only room 5's
+   train / validation / unseen-test comparison has one so far. */
+
+.chart-key {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.1rem 0.7rem;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  font-size: 0.62rem;
+  letter-spacing: 0.06em;
+  color: var(--hairline-soft);
+}
+
+.chart-key li { display: flex; align-items: center; gap: 0.3rem; }
+
+.chart-key-swatch {
+  width: 0.66rem;
+  height: 2px;
+  background: var(--muted);
+}
+
+.chart-key-swatch[data-tone="accent"] { background: var(--accent); }
+.chart-key-swatch[data-tone="warn"] { background: var(--warn); }
+.chart-key-swatch[data-tone="goal"] { background: var(--goal); }
 
 /* ---- a label, used on every screen --------------------------------- */
 

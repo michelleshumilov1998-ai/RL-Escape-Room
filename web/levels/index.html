@@ -18,6 +18,20 @@
      than an arrow, because both arrows already mean something here. -->
 <button type="button" class="btn back" id="back">Main menu</button>
 
+<!--
+  Progress, stated rather than implied, and a way to start over.
+
+  Progress lives in localStorage, so it survives closing the browser — which
+  is right, but it used to be entirely invisible: a returning player was
+  dropped onto the furthest chamber they had reached with nothing saying why,
+  which reads as the game having started in the wrong room. Now it says how
+  much has been cleared, and there is a way back to a clean run.
+-->
+<div class="progress-bar">
+  <p class="progress-note" id="progress-note"></p>
+  <button type="button" class="btn tiny" id="new-game">New game</button>
+</div>
+
 <main class="stage" id="stage">
 
   <!-- Position. Counts all five chambers whether they are open or not. -->

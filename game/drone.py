@@ -72,6 +72,62 @@ THRUST = {
 }
 
 
+# How thick the masonry around a continuous chamber is drawn, in metres. One
+# metre, because that is one cell of rooms 1 to 3 and the brick coursing has to
+# match theirs exactly for the two to read as the same building.
+CHAMBER_WALL = 1.0
+
+
+def chamber_wall_entities(width, height, thickness=CHAMBER_WALL):
+    """The laboratory wall around a continuous chamber, as ordinary tiles.
+
+    THE SAME WALL AS ROOMS 1 TO 3, AND WHY IT IS STATED THIS WAY
+    Rooms 1 to 3 are enclosed by `wall` tiles one cell square, drawn by the
+    masonry recipe. Rooms 4 and 5 used a single `tunnelWall` entity spanning
+    the whole chamber whose recipe drew a thin stroked frame with brackets and
+    measurement ticks on it — a pressure vessel, not a laboratory, and the one
+    thing that made the two halves of the building look like different games.
+    So the wall is now a ring of the very same tiles, at the very same size,
+    and the renderer draws them with the very same recipe. Nothing about the
+    look is decided here or there twice.
+
+    THE RING IS OUTSIDE THE WORLD, WHICH IS THE HONEST PLACE FOR IT
+    A wall drawn *inside* the boundary would show the drone flying through
+    masonry: the run ends when the agent's centre comes within its own radius
+    of the edge, so the drone's hull touches the boundary exactly as it dies,
+    and there is no room inside for a wall of any thickness. Drawn outside, the
+    masonry's inner face sits on the boundary and the hull meets it at the
+    instant of the collision — which is what a wall looks like when it is real.
+
+    The renderer reserves the margin for it; see `wallMargin` in
+    `definition.py`. Tiles are one unit square and laid on the unit grid, so
+    the courses line up with the floor tiling and with the walls of rooms 1
+    to 3 that they are meant to be continuous with.
+    """
+    tiles = []
+    across = int(round(width / thickness))
+    down = int(round(height / thickness))
+    half = thickness / 2.0
+
+    def tile(column, row):
+        tiles.append({
+            "id": "wall%d_%d" % (column, row),
+            "type": "wall",
+            "position": {"x": column * thickness + half,
+                         "y": row * thickness + half},
+            "size": {"width": thickness, "height": thickness},
+        })
+
+    # The two long runs, corners included, then the two sides between them.
+    for column in range(-1, across + 1):
+        tile(column, -1)
+        tile(column, down)
+    for row in range(0, down):
+        tile(-1, row)
+        tile(across, row)
+    return tiles
+
+
 class DroneWorld:
     """A continuous 10 x 10 m chamber flown by thrust.
 
@@ -201,7 +257,7 @@ class DroneWorld:
                 return True
         return False
 
-    def _zones_at(self, x, y):
+    def zones_at(self, x, y):
         """Every zone containing a point, in declaration order."""
         found = []
         for zone in self.zones:
@@ -210,7 +266,7 @@ class DroneWorld:
                 found.append(zone)
         return found
 
-    def _distance_to_pad(self, x, y):
+    def distance_to_pad(self, x, y):
         """Straight-line distance to the pad's centre.
 
         Deliberately the centre and not the nearest edge: the shaped reward
@@ -241,9 +297,9 @@ class DroneWorld:
         costs nothing.
         """
         x, y, vx, vy = self.state
-        before = self._distance_to_pad(x, y)
+        before = self.distance_to_pad(x, y)
 
-        zones = self._zones_at(x, y)
+        zones = self.zones_at(x, y)
 
         # Thrust, scaled by any zone that changes what a push is worth.
         push_x, push_y = THRUST[action]
@@ -292,11 +348,11 @@ class DroneWorld:
         # Written as a difference of distances so that the total over any
         # round trip is zero — a shaping term that paid for approach without
         # charging for retreat would make circling the pad profitable.
-        after = self._distance_to_pad(x, y)
+        after = self.distance_to_pad(x, y)
         reward += (before - after) * self.rewards["progress"]
 
         # The danger zones, charged once per entry.
-        for zone in self._zones_at(x, y):
+        for zone in self.zones_at(x, y):
             if zone.get("danger") and zone["id"] not in self._charged:
                 self._charged.add(zone["id"])
                 reward += self.rewards["danger"]
@@ -338,6 +394,21 @@ class DroneWorld:
     # What the screen is given
     # ------------------------------------------------------------------
 
+    @staticmethod
+    def _blows(vector):
+        """A vector turned into the word the drawing recipes want.
+
+        `stream` and `vent` in `shapes.js` point their chevrons by a compass
+        word rather than by an angle, and that translation is done here on
+        purpose: the wind model lives in this file, and the renderer must not
+        be in a position to disagree with it about which way the air moves.
+        The magnitude goes over as well, so the drawing can show strength
+        without recomputing anything.
+        """
+        if abs(vector[0]) >= abs(vector[1]):
+            return "right" if vector[0] > 0 else "left"
+        return "down" if vector[1] > 0 else "up"
+
     def entities(self):
         """The chamber's furniture, in the room screen's contract shape.
 
@@ -345,24 +416,37 @@ class DroneWorld:
         one per cell. There is no layout here, so the room states its own
         entities and this is where they come from. Positions are centres in
         world units, which is the one coordinate system the contract has.
+
+        NOTHING HERE IS PHYSICS
+        Every entity below is a description of something the model already
+        does. The fans are the clearest case: they apply no force at all. The
+        wind zone applies the force, and a fan is drawn at the mouth of that
+        zone so the force has a visible cause. Deleting every fan would change
+        how the chamber reads and not one number in `step`.
         """
-        entities = [{
+        pad = self.pad
+        entities = chamber_wall_entities(self.width, self.height)
+        entities += [{
             "id": "pad",
             "type": "pad",
-            "position": {"x": self.pad["x"], "y": self.pad["y"]},
-            "size": {"width": self.pad["width"], "height": self.pad["height"]},
+            "position": {"x": pad["x"], "y": pad["y"]},
+            "size": {"width": pad["width"], "height": pad["height"]},
+            # The platform draws its own guidance marks, and it needs to know
+            # how slow is slow enough to say so.
+            "appearance": {"landingSpeed": self.landing_speed},
         }, {
             "id": "launch",
             "type": "start",
             "position": {"x": self.start_position[0],
                          "y": self.start_position[1]},
-            "size": {"width": 0.6, "height": 0.6},
+            "size": {"width": 0.7, "height": 0.7},
         }]
 
         for index, pillar in enumerate(self.pillars):
-            # A circle described as a square of the same span: the renderer is
-            # told which *shape* to draw by the entity type, and "pillar"
-            # draws a disc inside the box it is given.
+            # A disc described as the square that bounds it. The recipe draws
+            # the disc to the full width of that box, so what is on screen is
+            # the circle `_crashed` actually tests against — the radius is not
+            # written down twice.
             entities.append({
                 "id": "pillar%d" % index,
                 "type": "pillar",
@@ -378,26 +462,137 @@ class DroneWorld:
                 "position": {"x": zone["x"], "y": zone["y"]},
                 "size": {"width": zone["width"], "height": zone["height"]},
             }
-            # A wind zone carries its direction, so the renderer can draw the
-            # arrows the right way round without knowing what wind is. Scaled
-            # by the run's wind strength, so the arrows describe the run.
             wind = zone.get("wind")
             if wind:
+                strength = self.wind
+                blowing = (wind[0] * strength, wind[1] * strength)
                 entity["appearance"] = {
-                    "vector": {"x": wind[0] * self.wind,
-                               "y": wind[1] * self.wind},
+                    "blows": self._blows(wind),
+                    # Both are handed over so the drawing can show *how hard*
+                    # without owning any part of the model.
+                    "vector": {"x": blowing[0], "y": blowing[1]},
+                    "strength": strength,
                 }
             entities.append(entity)
 
+        # The fans, at the mouth of each wind zone: decoration with a job,
+        # which is to make it obvious where the air comes from and which way
+        # it goes. Placed against whichever chamber edge the zone blows away
+        # from, so a band blowing down gets fans along its top.
+        for zone in self.zones:
+            wind = zone.get("wind")
+            if not wind:
+                continue
+            entities.extend(self._fans_for(zone, wind))
+
+        # Two lamps flanking the landing platform, and one over the
+        # overcharge. Both are the sort of thing a real test chamber would
+        # have and both mark something that matters.
+        entities.append({
+            "id": "lamp-pad",
+            "type": "warningLight",
+            "position": {"x": pad["x"] - pad["width"] / 2.0 - 0.32,
+                         "y": pad["y"]},
+            "size": {"width": 0.3, "height": 0.3},
+            "appearance": {"color": "--goal"},
+        })
+        for zone in self.zones:
+            if zone.get("danger"):
+                entities.append({
+                    "id": "lamp-" + zone["id"],
+                    "type": "warningLight",
+                    "position": {"x": zone["x"],
+                                 "y": zone["y"] - zone["height"] / 2.0 - 0.3},
+                    "size": {"width": 0.3, "height": 0.3},
+                })
+
         return entities
+
+    def _fans_for(self, zone, wind):
+        """The bank of fans driving one wind zone.
+
+        Positioned just outside the zone on its upwind edge and clamped inside
+        the chamber, so they read as the thing pushing the air through it.
+        """
+        blows = self._blows(wind)
+        vertical = blows in ("up", "down")
+        span = zone["width"] if vertical else zone["height"]
+        # As many fans as fit across the mouth without crowding, at least one.
+        count = max(1, min(3, int(span / 0.9)))
+        size = min(0.95, span / count * 0.85)
+        depth = 0.62
+
+        if vertical:
+            edge = (zone["y"] - zone["height"] / 2.0 if blows == "down"
+                    else zone["y"] + zone["height"] / 2.0)
+            offset = -depth / 2.0 if blows == "down" else depth / 2.0
+            along = zone["x"]
+        else:
+            edge = (zone["x"] - zone["width"] / 2.0 if blows == "right"
+                    else zone["x"] + zone["width"] / 2.0)
+            offset = -depth / 2.0 if blows == "right" else depth / 2.0
+            along = zone["y"]
+
+        fans = []
+        for index in range(count):
+            share = (index - (count - 1) / 2.0) * (span / count)
+            centre = along + share
+            if vertical:
+                x, y = centre, edge + offset
+            else:
+                x, y = edge + offset, centre
+            fans.append({
+                "id": "%s-fan%d" % (zone["id"], index),
+                "type": "fan",
+                # Clamped so a fan never straddles the chamber wall.
+                "position": {"x": min(max(x, size / 2.0),
+                                      self.width - size / 2.0),
+                             "y": min(max(y, size / 2.0),
+                                      self.height - size / 2.0)},
+                "size": {"width": size, "height": size},
+                "appearance": {"blows": blows, "strength": self.wind,
+                               # Fans in one bank are given different phases so
+                               # the bank does not turn as a single object.
+                               "phase": index * 0.37},
+            })
+        return fans
 
     def loose_entities(self):
         """Nothing moves in this room but the drone. See the module docstring."""
         return []
 
+    # How near the platform counts as "on approach", in metres. Only the
+    # warning light uses it; nothing in the model reads it.
+    APPROACH_RANGE = 1.8
+
     def frame_extras(self, state):
-        """Nothing in this chamber changes appearance or position."""
-        return None, None
+        """What the landing platform looks like at this moment.
+
+        Nothing in this chamber moves and nothing changes colour except the
+        platform, which reports how the approach is going. It is here rather
+        than in the renderer for the reason the whole contract exists: the
+        screen must never be in a position to announce a landing the
+        environment did not agree to. The four words below are the only way it
+        can say so, and only `_landing` decides which one it is.
+
+        A pure function of the state, like every other frame field, so a
+        recorded step and the live view cannot describe the same moment
+        differently — and so scrubbing a replay backwards shows the approach
+        going wrong again rather than staying red.
+        """
+        outcome, speed = self._landing(state)
+        if outcome == "landed":
+            look = "landed"
+        elif outcome == "crashed":
+            look = "crashed"
+        elif (self.distance_to_pad(state[0], state[1]) <= self.APPROACH_RANGE
+              and (abs(state[2]) > self.landing_speed
+                   or abs(state[3]) > self.landing_speed)):
+            # Near, and too fast to land if it arrived now.
+            look = "fast"
+        else:
+            look = "clear"
+        return [{"id": "pad", "state": look}], None
 
     def layout_snapshot(self):
         """There is no layout. Kept so every world answers the same questions."""

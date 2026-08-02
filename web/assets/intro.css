@@ -1,0 +1,258 @@
+/* =====================================================================
+   The opening cinematic, and the reveal of the title behind it.
+
+   Same palette, same thin uppercase type, same hairlines as everywhere
+   else. Nothing here introduces a colour: --title, --accent, --hazard and
+   --muted do all of it.
+   ===================================================================== */
+
+/* ---- the menu is visible by default -------------------------------- *
+   THIS IS WRITTEN THE ONLY SAFE WAY ROUND, AND IT WAS NOT BEFORE.
+
+   It used to be `.stage { opacity: 0 }` with a `.is-revealed` class added by
+   the cinematic when it finished. That makes the main menu invisible until
+   JavaScript says otherwise — so anything at all going wrong on the way (a
+   script failing to load, a throw in an unrelated module, a slow network) left
+   PLAY and ABOUT permanently invisible with no way out. The menu is not part
+   of the cinematic and must never depend on it.
+
+   So the default is visible, and the cinematic *hides* it for as long as it is
+   actually running by putting a class on the body. No JavaScript, a broken
+   script, a thrown error, a stale cache: in every one of those cases the menu
+   is simply there.                                                          */
+
+.stage { transition: opacity 700ms ease; }
+
+body.is-introducing .stage {
+  opacity: 0;
+  /* Not clickable while it is invisible, so a click during the cinematic
+     cannot land on a button the player cannot see. */
+  pointer-events: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .stage { transition: none; }
+}
+
+/* ---- leaving for the chamber select -------------------------------- *
+   A fade rather than a cut, so the first sector is arrived at rather than
+   jumped to.                                                          */
+
+body { transition: opacity 600ms ease; }
+body.is-leaving { opacity: 0; }
+
+/* ---- the cinematic ------------------------------------------------- */
+
+.intro {
+  position: fixed;
+  inset: 0;
+  z-index: 30;
+  display: grid;
+  place-items: center;
+  /* Takes clicks, because clicking anywhere skips. */
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 700ms ease;
+  /* Darker than the start screen's own vignette: the type is small and
+     there is a robot running about behind it. */
+  background: radial-gradient(ellipse 80% 70% at 50% 50%,
+              color-mix(in srgb, var(--base) 82%, transparent) 0%,
+              color-mix(in srgb, var(--base) 62%, transparent) 55%,
+              color-mix(in srgb, var(--base) 30%, transparent) 100%);
+}
+
+.intro.is-open { opacity: 1; }
+.intro[hidden] { display: none; }
+
+/* Every slide is stacked in the same place and cross-faded, so one dissolves
+   into the next instead of the screen going blank between them.
+
+   WHICH SLIDE IS SHOWING IS A CLASS, NOT A CLOCK
+   These used to have their opacity written every animation frame from a
+   timeline. The player sets the pace now, so a slide is either the current
+   one or it is not, and CSS does the fade. */
+#intro-cards {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: min(46rem, 88vw);
+  min-height: 11rem;
+}
+
+.intro-card {
+  grid-area: 1 / 1;
+  margin: 0;
+  text-align: center;
+  opacity: 0;
+  /* Not clickable while faded out, or the stack would swallow the click that
+     is meant to advance the briefing. */
+  pointer-events: none;
+  /* A slide arrives from very slightly below: enough to read as a change of
+     page, not enough to be a movement. */
+  transform: translateY(0.5rem);
+  transition: opacity 420ms ease, transform 420ms ease;
+  display: flex;
+  flex-direction: column;
+  gap: 0.55rem;
+}
+
+.intro-card.is-shown {
+  opacity: 1;
+  transform: none;
+}
+
+/* Reduced motion, and no-JS-transitions safety: a shown slide is shown. */
+.intro.is-still .intro-card { transition: none; transform: none; }
+
+.intro-card p { margin: 0; }
+
+/* PROJECT R-5, at the start screen's own title weight and tracking. */
+.intro-card.is-title p {
+  font-size: clamp(1.9rem, 6.6vw, 4.4rem);
+  font-weight: 200;
+  letter-spacing: 0.24em;
+  text-transform: uppercase;
+  color: var(--title);
+  text-shadow: 0 0 30px color-mix(in srgb, var(--accent) 26%, transparent);
+}
+
+/* The narration. The first line of a slide carries it; anything after is
+   supporting, so it steps down rather than repeating the same weight. */
+.intro-card.is-line p {
+  font-size: clamp(0.9rem, 2.2vw, 1.4rem);
+  font-weight: 200;
+  letter-spacing: 0.06em;
+  line-height: 1.55;
+  color: var(--title);
+}
+
+.intro-card.is-line p:first-child {
+  font-family: var(--mono);
+  font-size: clamp(0.68rem, 1.5vw, 0.86rem);
+  letter-spacing: 0.3em;
+  text-transform: uppercase;
+  color: var(--accent);
+  margin-bottom: 0.4rem;
+}
+
+/* The last slide, which hands over to the menu. */
+.intro-card.is-close p {
+  font-size: clamp(0.95rem, 2.4vw, 1.5rem);
+  font-weight: 200;
+  letter-spacing: 0.06em;
+  line-height: 1.55;
+  color: var(--title);
+}
+
+/* "Mission Briefing", "Press PLAY": the small stamped line under a slide. */
+.intro-sub {
+  font-family: var(--mono);
+  font-size: clamp(0.6rem, 1.1vw, 0.74rem);
+  letter-spacing: 0.34em;
+  text-transform: uppercase;
+  color: var(--hairline);
+  margin-top: 0.7rem !important;
+}
+
+.intro-card.is-close .intro-sub {
+  color: var(--accent);
+  text-shadow: 0 0 20px color-mix(in srgb, var(--accent) 40%, transparent);
+}
+
+/* ---- the footer: how far through, and how to go on ----------------- */
+
+.intro-foot {
+  position: fixed;
+  left: 50%;
+  bottom: clamp(1.1rem, 3.4vh, 2.2rem);
+  transform: translateX(-50%);
+  z-index: 31;
+  display: flex;
+  align-items: center;
+  gap: clamp(0.9rem, 3vw, 1.6rem);
+}
+
+#intro-dots {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.intro-dot {
+  width: 1.6rem;
+  height: 2px;
+  background: var(--hairline);
+  opacity: 0.4;
+  transition: opacity 300ms ease, background-color 300ms ease;
+}
+
+.intro-dot.is-on {
+  background: var(--accent);
+  opacity: 1;
+}
+
+/* NEXT is the one control the briefing is built around, so it is the lit
+   one — Skip stays a hairline ghost in the corner. */
+#intro-next {
+  font-size: 0.68rem;
+  letter-spacing: 0.22em;
+  padding: 0.85em 2.4em;
+  color: var(--base);
+  background: var(--accent);
+  border-color: var(--accent);
+  box-shadow: 0 0 26px color-mix(in srgb, var(--accent) 34%, transparent);
+}
+
+#intro-next:hover, #intro-next:focus-visible {
+  background: var(--title);
+  border-color: var(--title);
+  box-shadow: 0 0 34px color-mix(in srgb, var(--accent) 52%, transparent);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .intro { transition: none; }
+  .intro-dot { transition: none; }
+}
+
+/* ---- the caption over the animation -------------------------------- *
+   What the robot behind the text is actually doing, read from the scene
+   itself. This is what turns a robot dying repeatedly into a robot
+   learning — see `Intro.caption`.                                      */
+
+#intro-caption {
+  position: fixed;   /* to the viewport, though it now lives inside .intro */
+  left: 50%;
+  bottom: clamp(4.5rem, 12vh, 7rem);
+  transform: translateX(-50%);
+  margin: 0;
+  font-family: var(--mono);
+  font-size: clamp(0.58rem, 1vw, 0.7rem);
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--hairline);
+  white-space: nowrap;
+}
+
+/* ---- skip ---------------------------------------------------------- */
+
+#intro-skip {
+  position: fixed;
+  right: clamp(1rem, 3vw, 2rem);
+  bottom: clamp(1rem, 3vh, 2rem);
+  font-size: 0.66rem;
+  letter-spacing: 0.2em;
+  padding: 0.8em 1.8em;
+  /* Above the overlay's own click-to-skip, so it is a button rather than a
+     coincidence. */
+  z-index: 31;
+  /* Lit rather than a ghost hairline. It was --muted on a dark moving
+     background at 0.62rem, which is easy to miss entirely — and the one
+     control that must never be missed is the one that ends the cinematic. */
+  color: var(--title);
+  border-color: color-mix(in srgb, var(--accent) 45%, var(--hairline));
+  background: color-mix(in srgb, var(--base) 70%, transparent);
+}
+
+#intro-skip:hover, #intro-skip:focus-visible {
+  color: var(--accent);
+  border-color: var(--accent);
+}

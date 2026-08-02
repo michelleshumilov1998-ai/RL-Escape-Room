@@ -9,3 +9,4 @@ __pycache__/
 
 # Local tooling caches (project settings under .claude/ stay tracked)
 .claude/transcript-uploader/
+.DS_Store

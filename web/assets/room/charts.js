@@ -44,12 +44,23 @@ window.Charts = (function () {
     { key: 'convergence', label: 'Convergence measure' },
   ];
 
+  /* A series may instead name several `keys` and a `source`, which draws them
+     on one pair of axes in different colours with a small key underneath.
+     Room 5 uses it for the one measurement that is not a property of a
+     training episode: how the frozen policy does on the layouts it trains on
+     against the layouts it has never seen. Those points come from
+     `checkpoints` rather than from the per-episode history, which is why a
+     series carries where to read itself from. */
+  const MULTI_COLOURS = ['accent', 'warn', 'goal'];
+
   function palette() {
     const computed = window.getComputedStyle(document.documentElement);
     return {
       accent: computed.getPropertyValue(C.colors.accent).trim(),
       muted: computed.getPropertyValue(C.colors.muted).trim(),
       hairline: computed.getPropertyValue(C.colors.hairlineFaint).trim(),
+      warn: computed.getPropertyValue(C.colors.warn).trim(),
+      goal: computed.getPropertyValue(C.colors.goal).trim(),
     };
   }
 
@@ -211,6 +222,82 @@ window.Charts = (function () {
     ctx.stroke();
   }
 
+  /**
+   * Several series on one pair of axes, each its own colour.
+   *
+   * Unlike `drawSeries` this draws the values as they are: no rolling
+   * average, because these are already summary measurements taken every few
+   * hundred episodes rather than a noisy per-episode series, and smoothing a
+   * sixteen-point line would only blur the thing it is meant to show. The
+   * band is shared across all the lines so they can be compared by height,
+   * which is the entire point of putting them together.
+   */
+  function drawLines(canvas, series, colours) {
+    const ratio = window.devicePixelRatio || 1;
+    const cssWidth = canvas.clientWidth || 1;
+    const cssHeight = canvas.clientHeight || C.charts.height;
+
+    canvas.width = Math.round(cssWidth * ratio);
+    canvas.height = Math.round(cssHeight * ratio);
+
+    const ctx = canvas.getContext('2d');
+    ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
+    ctx.clearRect(0, 0, cssWidth, cssHeight);
+
+    const pad = C.charts.padding;
+    const plot = {
+      left: pad.left,
+      top: pad.top,
+      width: Math.max(1, cssWidth - pad.left - pad.right),
+      height: Math.max(1, cssHeight - pad.top - pad.bottom),
+    };
+
+    const every = series.reduce(
+      (all, line) => all.concat(line.values), []);
+    if (!every.length) {
+      ctx.fillStyle = colours.hairline;
+      ctx.font = '10px ' + window.getComputedStyle(document.body).fontFamily;
+      ctx.fillText('no measurements yet',
+                   plot.left + 2, plot.top + plot.height / 2);
+      return;
+    }
+
+    // Rates share a band of 0 to 1 so that "a fifth of the way up" means the
+    // same on every line and between one repaint and the next.
+    const span = extent(every.concat([0]));
+    const count = Math.max(...series.map(line => line.values.length));
+
+    function plotX(index) {
+      if (count === 1) return plot.left + plot.width / 2;
+      return plot.left + (index / (count - 1)) * plot.width;
+    }
+    function plotY(value) {
+      const share = (value - span.low) / (span.high - span.low);
+      return plot.top + plot.height - share * plot.height;
+    }
+
+    series.forEach(line => {
+      if (!line.values.length) return;
+      ctx.strokeStyle = line.colour;
+      ctx.fillStyle = line.colour;
+      ctx.lineWidth = 1.4;
+      if (line.values.length === 1) {
+        ctx.beginPath();
+        ctx.arc(plotX(0), plotY(line.values[0]), 2, 0, Math.PI * 2);
+        ctx.fill();
+        return;
+      }
+      ctx.beginPath();
+      line.values.forEach((value, index) => {
+        const x = plotX(index);
+        const y = plotY(value);
+        if (index === 0) ctx.moveTo(x, y);
+        else ctx.lineTo(x, y);
+      });
+      ctx.stroke();
+    });
+  }
+
   /* ---------------------------------------------------------------------
      Building and refreshing the set
      ------------------------------------------------------------------- */
@@ -242,21 +329,72 @@ window.Charts = (function () {
 
       wrapper.appendChild(head);
       wrapper.appendChild(canvas);
-      host.appendChild(wrapper);
 
-      return { series: series, canvas: canvas, latest: latest };
+      // A multi-line chart needs saying which line is which, and the colours
+      // are the only thing distinguishing them.
+      let key = null;
+      if (series.keys) {
+        key = document.createElement('ul');
+        key.className = 'chart-key';
+        series.keys.forEach((name, index) => {
+          const item = document.createElement('li');
+          const swatch = document.createElement('span');
+          swatch.className = 'chart-key-swatch';
+          swatch.dataset.tone = MULTI_COLOURS[index % MULTI_COLOURS.length];
+          item.appendChild(swatch);
+          item.appendChild(document.createTextNode(name));
+          key.appendChild(item);
+        });
+        wrapper.appendChild(key);
+      }
+
+      host.appendChild(wrapper);
+      return { series: series, canvas: canvas, latest: latest, key: key };
     });
 
     /**
      * Redraw them all.
      *
+     * `data` is either the metrics array — which is what rooms 1 to 4 pass and
+     * what this always took — or an object carrying several named series.
+     * Room 5 needs the second because not everything it graphs is a property
+     * of a training episode: the train / validation / unseen-test comparison
+     * is measured periodically with the weights frozen and lives in
+     * `checkpoints`, on its own x-axis of episode numbers.
+     *
      * `context` is passed to any series whose threshold moves — room 1's
      * stopping threshold is a parameter, so its line has to follow it.
      */
-    return function repaint(metrics, context) {
+    return function repaint(data, context) {
       const colours = palette();
+      const bundle = Array.isArray(data) ? { history: data } : (data || {});
+      // `history` is every episode; `metrics` is the sampled few kept frame by
+      // frame. A room that sends only one of them gets it used for both.
+      const history = bundle.history || bundle.metrics || [];
+
       built.forEach(chart => {
-        const values = (metrics || []).map(entry => entry[chart.series.key])
+        const rows = chart.series.source === 'checkpoints'
+          ? (bundle.checkpoints || [])
+          : history;
+
+        if (chart.series.keys) {
+          const lines = chart.series.keys.map((name, index) => ({
+            colour: colours[MULTI_COLOURS[index % MULTI_COLOURS.length]],
+            values: rows.map(entry => entry[name])
+              .filter(value => typeof value === 'number' && isFinite(value)),
+          }));
+          drawLines(chart.canvas, lines, colours);
+          const last = lines.map(line => line.values[line.values.length - 1]);
+          chart.latest.textContent = last.every(
+            value => value === undefined)
+            ? ''
+            : last.map(value => value === undefined ? '—'
+                                                    : formatLatest(value))
+                  .join(' / ');
+          return;
+        }
+
+        const values = rows.map(entry => entry[chart.series.key])
           .filter(value => typeof value === 'number' && isFinite(value));
         const threshold = typeof chart.series.threshold === 'function'
           ? chart.series.threshold(context)

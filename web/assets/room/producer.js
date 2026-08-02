@@ -115,6 +115,22 @@ window.Producer = (function () {
     return definition;
   }
 
+  /**
+   * The learned policy measured on training, validation and unseen layouts,
+   * with the random baseline beside it. Weights are frozen throughout.
+   */
+  function evaluate(layouts) {
+    return S.evaluate(layouts);
+  }
+
+  /**
+   * A warehouse the agent has never trained on, flown by the learned policy
+   * and recorded frame by frame. Called again, it picks a different one.
+   */
+  function testRoom(seed) {
+    return S.testRoom(seed);
+  }
+
   return {
     open: open,
     begin: begin,
@@ -123,6 +139,8 @@ window.Producer = (function () {
     episodes: episodes,
     replay: replay,
     restart: restart,
+    evaluate: evaluate,
+    testRoom: testRoom,
 
     /* Read back without a round trip. The shell asks for these while
        painting, which must not be async. */

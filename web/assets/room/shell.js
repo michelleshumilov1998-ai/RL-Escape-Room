@@ -28,6 +28,8 @@
     legend: document.getElementById('legend'),
     strip: {
       episodes: document.getElementById('strip-episodes'),
+      objective: document.getElementById('strip-objective'),
+      environment: document.getElementById('strip-environment'),
       state: document.getElementById('strip-state'),
       metric: document.getElementById('strip-metric'),
       cleared: document.getElementById('strip-cleared'),
@@ -66,6 +68,15 @@
     inspectReadout: document.getElementById('inspect-readout'),
     inspectEmpty: document.getElementById('inspect-empty'),
     compare: document.getElementById('compare'),
+    generalisation: document.getElementById('generalisation-section'),
+    generalisationHint: document.getElementById('generalisation-hint'),
+    evaluate: document.getElementById('evaluate'),
+    testRoom: document.getElementById('test-room'),
+    anotherTestRoom: document.getElementById('another-test-room'),
+    testRoomHint: document.getElementById('test-room-hint'),
+    evaluationTable: document.getElementById('evaluation-table'),
+    ending: document.getElementById('ending'),
+    cleared: document.getElementById('cleared'),
   };
 
   /* Only reached if a room offers no algorithm at all, which no built room
@@ -134,6 +145,29 @@
        out, fetched once when training finishes. Null until then, because
        until then there is no settled policy to run. */
     greedy: null,
+    /* The last unseen-room run, if one has been asked for. Until there is
+       one, "another unseen room" has nothing to be another of. */
+    testedRoom: null,
+    /* The mission stage the live view last saw, and how many frames ago it
+       changed. See `liveDetail`. Null until a room with a mission reports one. */
+    liveStage: null,
+    liveSince: null,
+    /* The detail of whichever frame was drawn last — live or replayed.
+       The objective line reads this so it always describes the frame on
+       screen rather than whichever source happens to be newer. */
+    lastDetail: null,
+    /* Whether the collapse sound has already played for the frame being
+       shown. See `soundCollapse`. */
+    lastCollapse: false,
+    /* The ending sequence, for the last chamber only. `endingSeen`
+       latches so the sequence arrives once rather than every time the
+       run is repainted. */
+    ending: null,
+    endingSeen: false,
+    /* The sector-cleared flash, and whether it has been shown for this
+       run. Latched, because `isCleared` is asked on every repaint. */
+    clearedFlash: null,
+    clearedFlashSeen: false,
     /* Steps owed but not yet whole, carried between frames so the speeds
        mean what they say per second. */
     owed: 0,
@@ -168,6 +202,44 @@
     ui.world.fit(ui.room, sidebarInset());
     ui.inspector.fit(ui.room, 0, C.stepReplay.padding);
     paintInspector();
+    redrawWorld();
+  }
+
+  /**
+   * Put the world back on the canvas after anything that cleared it.
+   *
+   * WHY THIS HAS TO EXIST
+   * `fit` assigns `canvas.width`, and assigning that wipes the canvas — so
+   * every re-fit blanks the world. That is fine while something is animating,
+   * because the next frame paints it again. It is not fine at rest: opening
+   * this screen fits, draws once, and then `setSidebar` schedules a second
+   * fit 220ms later for the end of the sidebar transition, which wiped the
+   * room and left nothing to redraw it. The chamber was simply blank until
+   * Train was pressed and the live loop took over.
+   *
+   * Draws whichever description of the world is current — a replayed frame if
+   * one is selected, the live scene if training has produced one, and the bare
+   * room otherwise. Never invents anything: with nothing to show it draws the
+   * chamber with no agent in it, which is exactly right before a run starts.
+   */
+  function redrawWorld() {
+    if (!ui.room || !ui.world) return;
+    // A running loop owns the canvas; leave it alone rather than fighting it
+    // for the same frame.
+    if (ui.liveFrame !== null) return;
+    if (ui.playback && (ui.playback.state === P.RUNNING
+                        || ui.playback.state === P.REPLAYING)) {
+      return;
+    }
+    const replayed = ui.playback && ui.playback.selected !== null
+      ? ui.playback.snapshot() : null;
+    if (replayed && replayed.position) {
+      ui.world.draw(replayed);
+      return;
+    }
+    const live = liveSnapshot();
+    ui.world.draw(live && live.position ? live
+                                       : { room: ui.room, position: null });
   }
 
   /* ---------------------------------------------------------------------
@@ -325,7 +397,14 @@
     // The run is not thrown away here; that is the point of making Reset
     // explicit.
     ui.stale = true;
-    ui.staleReason = specification.label + ' changed';
+    /* An environment parameter is not the same kind of change as a learning
+       one: it alters the room itself, so the policy is not merely out of date
+       but was learned against a different world. Said plainly, because the
+       generic "X changed" did not convey that the results on screen no longer
+       describe the room the player is now looking at. */
+    ui.staleReason = specification.appliesLive
+      ? specification.label + ' changed'
+      : 'Environment changed — retrain to update the policy';
     if (ui.compare) ui.compare.setParameters(currentParameters());
     // Some parameters shape the room itself rather than the learning, so
     // what the room says about itself has to keep up even before Reset.
@@ -454,6 +533,25 @@
    * is the right question for `isCleared` and the wrong one for the route to
    * display. See `finalRoute`.
    */
+  /**
+   * Whether an episode *began* part-way through the mission.
+   *
+   * A share of training episodes start at the control terminal already in
+   * stage 1, so the second half of the mission gets practised instead of
+   * starving — see `WarehouseWorld.reset`. Browsing those without knowing it
+   * is genuinely misleading: the episode opens with the terminal spent, the
+   * blast door open and the beams down, which looks exactly like a room that
+   * has been won. It is a practice start, and it is labelled as one.
+   *
+   * Read off the recorded first frame, so it is a fact about the episode
+   * rather than a guess about the run.
+   */
+  function startedMidMission(episode) {
+    if (!episode || !episode.steps || !episode.steps.length) return false;
+    const first = episode.steps[0].detail;
+    return Boolean(first && first.stage);
+  }
+
   function bestRecordedRoute() {
     const played = recordedMetrics();
     if (!played.length) return null;
@@ -507,14 +605,80 @@
    * survive.
    */
   function isCleared() {
-    if (ui.everCleared) return true;
-    // Deliberately the recorded route and not the greedy one: the test is
-    // whether the agent ever actually got out, which is a fact about the run
-    // that happened. A policy that would get out is a different claim, and it
-    // is not this one.
-    const route = bestRecordedRoute();
-    if (route && route.succeeded) ui.everCleared = true;
+    /* NO EARLY RETURN ON `everCleared`.
+       There used to be one at the top of this function, and it was safe only
+       while becoming cleared and showing the overlay happened in the same
+       call. They no longer do: the chamber is cleared as soon as the run
+       earns it, and the overlay waits until R-5 has been watched arriving.
+       An early return here means the second of those is never reached, and
+       the overlay never appears at all. The work below is a couple of array
+       lookups per repaint, and it is guarded so it only runs while there is
+       still something left to find out. */
+    if (!ui.everCleared) {
+      // Deliberately the recorded route and not the greedy one: the test is
+      // whether the agent ever actually got out, which is a fact about the
+      // run that happened. A policy that would get out is a different claim,
+      // and it is not this one.
+      const route = bestRecordedRoute();
+      if (route && route.succeeded) ui.everCleared = true;
+    }
+
+    /* THE PLANNER'S ROOM HAS NO METRICS, AND WAS THEREFORE NEVER CLEARABLE
+       `bestRecordedRoute` walks `recordedMetrics()`, and room 1 keeps none:
+       Value Iteration is not episodic, so it records the single greedy walk
+       as an episode and no per-episode metrics beside it. The route lookup
+       therefore returned null there however well the room went, which meant
+       room 1 could never be marked cleared and never unlocked room 2.
+
+       So a recorded escape is also looked for directly. `solved` is the far
+       end's own verdict and it is the same question — for every room it
+       requires an episode that actually reached the exit — so this agrees
+       with the route test wherever both can answer. */
+    if (!ui.everCleared) {
+      const snapshot = window.Producer && window.Producer.snapshot;
+      if (snapshot && snapshot.solved) ui.everCleared = true;
+    }
+
+    maybeFlashCleared();
     return ui.everCleared;
+  }
+
+  /**
+   * Raise Mission Complete, once, when R-5 has been seen to arrive.
+   *
+   * WHEN THE OVERLAY IS ALLOWED ON SCREEN
+   * Not when the chamber becomes cleared — that is a fact about the recorded
+   * run, and it becomes true during *training*, while the robot on screen
+   * may be part-way across the room or not moving at all. The overlay used
+   * to arrive then, over a walking robot.
+   *
+   * It waits for all three of the things that make an arrival:
+   *   1. a recorded episode reached the exit            `everCleared`
+   *   2. playback walked that episode to its last step, so R-5 was drawn
+   *      arriving and its final stride landed           `witnessedEscape`
+   *   3. it has not already been shown for this run     `clearedFlashSeen`
+   *
+   * `everCleared` is deliberately left alone, so unlocking the next chamber
+   * and the cleared marker in the strip still happen the moment the run
+   * earns them. Only the overlay waits.
+   *
+   * CALLED FROM THE FRAME LOOP, NOT ONLY FROM THE STRIP PAINT
+   * This lived inside `isCleared`, which runs from `paintStrip` — and the
+   * strip is only repainted when `ui.dirty` is set, which a replay looping
+   * one episode never sets. So the one moment this is waiting for was the
+   * one moment nothing asked. It is its own function now and the frame
+   * handler calls it; once latched it is three boolean reads per frame.
+   */
+  function maybeFlashCleared() {
+    if (!ui.everCleared) return;
+    if (ui.clearedFlashSeen || !ui.clearedFlash) return;
+    if (!(ui.playback && ui.playback.witnessedEscape)) return;
+
+    ui.clearedFlashSeen = true;
+    ui.clearedFlash.show({
+      sector: ui.room && ui.room.sector,
+      last: Boolean(ui.room && ui.room.isFinal),
+    });
   }
 
   function showFinalRoute() {
@@ -584,6 +748,22 @@
     return ui.playback.metrics;
   }
 
+  /**
+   * What the charts are drawn from.
+   *
+   * The whole batch rather than one array, because the two things graphed here
+   * have different lengths and different x-axes. `history` is one row per
+   * episode ever run — that is what a learning curve is about. `metrics`
+   * covers only the couple of dozen episodes kept frame by frame, and a curve
+   * over those is a picture of the sampling rather than of the run.
+   * `checkpoints` is different again: held-out measurements taken every few
+   * hundred episodes with the weights frozen.
+   */
+  function chartData() {
+    if (ui.recorded) return ui.recorded;
+    return ui.playback.metrics;
+  }
+
   function buildEpisodeList(metrics) {
     const played = metrics || recordedMetrics();
     dom.episodeList.innerHTML = '';
@@ -610,6 +790,12 @@
       const outcome = episode ? episode.outcome : 'timeout';
       item.appendChild(element('span', 'episode-outcome is-' + outcome,
                                OUTCOME_LABELS[outcome] || outcome));
+      if (startedMidMission(episode)) {
+        const mark = element('span', 'episode-tag', 'practice');
+        mark.title = 'Began at the control terminal, in stage 2 of the '
+                   + 'mission, so the second half gets practised.';
+        item.appendChild(mark);
+      }
       item.appendChild(element('span', 'episode-reward',
                                entry.reward.toFixed(0)));
 
@@ -664,17 +850,259 @@
       ]
       : [
         ['Episode', String(selected + 1)],
+        ['Began', startedMidMission(episode)
+          ? 'at the terminal (practice start)' : 'at the start, door locked'],
         ['Outcome', OUTCOME_LABELS[episode.outcome] || episode.outcome],
         ['Reward', episode.totalReward.toFixed(0)],
         ['Exploration', episode.epsilon.toFixed(3)],
         ['Steps', String(episode.steps.length - 1)],
       ];
+    /* The environment this episode was recorded under.
+       Room 2's bridge risk is a slider, so two episodes with the same reward
+       can describe completely different rooms. The value is stored on the
+       episode itself by the recorder, so it is what that episode really ran
+       at rather than whatever the slider says now. */
+    if (typeof episode.collapseChance === 'number') {
+      rows.push(['Bridge collapse probability',
+                 episode.collapseChance.toFixed(2)]);
+    }
+
     const list = element('dl', 'readout');
     rows.forEach(pair => {
       list.appendChild(element('dt', null, pair[0]));
       list.appendChild(element('dd', null, pair[1]));
     });
     dom.episodeDetail.appendChild(list);
+  }
+
+  /* ---------------------------------------------------------------------
+     Generalisation: held-out layouts and unseen rooms
+
+     Only a chamber with layout pools has any of this, which is room 5
+     alone. Every number shown here is measured with the weights frozen —
+     the far end never calls an update from these paths — so an unseen
+     layout stays unseen however many times it is measured.
+     ------------------------------------------------------------------- */
+
+  function hasPools() {
+    return Boolean(ui.room && ui.room.layoutPools
+                   && ui.room.layoutPools.test);
+  }
+
+  function buildGeneralisation() {
+    dom.generalisation.hidden = !hasPools();
+    if (!hasPools()) return;
+
+    const pools = ui.room.layoutPools;
+    dom.generalisationHint.textContent =
+      'Training draws from ' + pools.train.count + ' warehouses (seeds '
+      + pools.train.first + '–' + pools.train.last + '). '
+      + pools.validation.count + ' more are kept back to check against, and '
+      + pools.test.count + ' are never trained on at all. The three pools do '
+      + 'not overlap, and nothing measured here updates a weight.';
+    paintGeneralisation();
+  }
+
+  function paintGeneralisation() {
+    if (!hasPools()) return;
+    // Nothing to evaluate until a policy exists. Before training these would
+    // measure untouched weights and report zeroes as though they meant
+    // something.
+    const ready = ui.trained && !ui.working;
+    disable(dom.evaluate, !ready);
+    disable(dom.testRoom, !ready);
+    disable(dom.anotherTestRoom, !ready || !ui.testedRoom);
+
+    if (!ui.trained) {
+      dom.testRoomHint.textContent =
+        'Train the agent first — there is no learned policy to test yet.';
+    }
+  }
+
+  /** The evaluation table, once it has been asked for. */
+  function paintEvaluation(report) {
+    dom.evaluationTable.innerHTML = '';
+    if (!report) return;
+
+    const rows = [
+      ['Training layouts', report.train],
+      ['Validation layouts', report.validation],
+      ['Unseen test layouts', report.test],
+      ['Unseen — random policy', report.randomTest],
+    ];
+
+    const table = element('table', 'rewards');
+    const head = element('tr');
+    ['', 'Escaped', 'Terminal', 'Collided', 'Reward'].forEach(name => {
+      head.appendChild(element('th', null, name));
+    });
+    table.appendChild(head);
+
+    rows.forEach(pair => {
+      const report_ = pair[1];
+      if (!report_) return;
+      const row = element('tr');
+      row.appendChild(element('td', null,
+                              pair[0] + ' (' + report_.layouts + ')'));
+      row.appendChild(element('td', null, percent(report_.escapeRate)));
+      row.appendChild(element('td', null, percent(report_.terminalRate)));
+      row.appendChild(element('td', null, percent(report_.collisionRate)));
+      row.appendChild(element('td', null,
+                              report_.meanReward.toFixed(1) + ' ± '
+                              + report_.rewardDeviation.toFixed(0)));
+      table.appendChild(row);
+    });
+    dom.evaluationTable.appendChild(table);
+
+    // The comparison that decides whether any of this means anything. A
+    // learned policy that does not beat a random one on held-out layouts has
+    // not generalised, however respectable the training numbers look.
+    const learned = report.test.escapeRate;
+    const chance = report.randomTest.escapeRate;
+    dom.evaluationTable.appendChild(element(
+      'p', 'hint',
+      learned > chance
+        ? 'On layouts it never trained on the learned policy escapes '
+          + percent(learned) + ' against ' + percent(chance)
+          + ' for a random one.'
+        : 'On layouts it never trained on the learned policy does not beat a '
+          + 'random one (' + percent(learned) + ' against ' + percent(chance)
+          + '). Whatever it learned has not transferred.'));
+  }
+
+  function percent(share) {
+    return Math.round(share * 100) + '%';
+  }
+
+  async function runEvaluation() {
+    if (ui.working) return;
+    ui.working = true;
+    paintGeneralisation();
+    dom.testRoomHint.textContent = 'Measuring every layout…';
+    try {
+      const report = await window.Producer.evaluate();
+      paintEvaluation(report);
+      dom.testRoomHint.textContent =
+        'Measured over ' + report.episodes + ' episodes of training, with the '
+        + 'weights frozen.';
+    } catch (problem) {
+      dom.testRoomHint.textContent = String(
+        (problem && problem.message) || problem);
+    }
+    ui.working = false;
+    paintGeneralisation();
+    paintControls();
+  }
+
+  /**
+   * Build an unseen warehouse, fly the learned policy in it, and replay it.
+   *
+   * The episode comes back shaped like any other, so it is handed to the
+   * playback controller and watched through the same transport controls. It
+   * is labelled unseen on the way in, because a run on a held-out layout is a
+   * different claim from a run on a trained one and the screen must not let
+   * the two be confused.
+   */
+  async function runTestRoom() {
+    if (ui.working) return;
+    ui.working = true;
+    paintGeneralisation();
+    dom.testRoomHint.textContent = 'Generating an unseen warehouse…';
+    try {
+      const episode = await window.Producer.testRoom();
+      ui.testedRoom = episode;
+
+      // Into the batch, so every reader that resolves an episode by number
+      // reaches it. Kept out of `metrics` on purpose: it is not a training
+      // episode and must not appear in the graphs of training.
+      const batch = ui.recorded || EMPTY_BATCH;
+      batch.episodes = batch.episodes
+        .filter(entry => entry.index !== episode.index)
+        .concat([episode]);
+      ui.recorded = batch;
+      ui.playback.load(ui.room, batch);
+      ui.playback.selectEpisode(episode.index);
+      ui.playback.start();
+
+      dom.testRoomHint.textContent =
+        'Unseen warehouse, seed ' + episode.layoutSeed + ' — never trained on. '
+        + 'The learned policy '
+        + (episode.outcome === 'success'
+            ? 'escaped in ' + (episode.steps.length - 1) + ' steps for '
+              + episode.totalReward.toFixed(0) + '.'
+            : (OUTCOME_LABELS[episode.outcome] || episode.outcome)
+              + ' after ' + (episode.steps.length - 1) + ' steps for '
+              + episode.totalReward.toFixed(0) + '.');
+      buildEpisodeList();
+      buildInspectorEpisodes();
+    } catch (problem) {
+      dom.testRoomHint.textContent = String(
+        (problem && problem.message) || problem);
+    }
+    ui.working = false;
+    paintGeneralisation();
+    paintAll();
+  }
+
+  /* ---------------------------------------------------------------------
+     The ending
+
+     Only the last chamber has one, and only a real escape earns it: the
+     test is `isCleared`, which is true when a recorded episode reached the
+     *blast door*. Activating the control terminal cannot make it true —
+     `info["goal"]` is set on `escaped` alone — so the sequence cannot
+     appear half-way through the mission.
+     ------------------------------------------------------------------- */
+
+  function hasEnding() {
+    return Boolean(ui.room && ui.room.isFinal && ui.ending);
+  }
+
+  /** The episode to offer as the final escape: the greedy route if it got
+   *  out, otherwise the last recorded episode that did. */
+  function escapeRoute() {
+    if (ui.greedy && ui.greedy.outcome === 'success') return ui.greedy.index;
+    const route = bestRecordedRoute();
+    return route && route.succeeded ? route.index : null;
+  }
+
+  /**
+   * Show the ending, if this chamber has one and has genuinely been escaped.
+   *
+   * Returns whether it was shown, so `leave` can hold the navigation back:
+   * the sequence appears *instead of* returning to the chamber select, which
+   * is the whole point of it.
+   */
+  function maybeShowEnding(force) {
+    if (!hasEnding()) return false;
+    if (!isCleared()) return false;
+    if (ui.endingSeen && !force) return false;
+
+    ui.endingSeen = true;
+    // Both loops stopped: the world behind the overlay is not being looked
+    // at, and a replay left running would go on asking for frames.
+    ui.playback.pause();
+    stopLive();
+    if (ui.running) {
+      ui.running = false;
+      window.Producer.hold().catch(() => {});
+    }
+
+    const batch = ui.recorded || EMPTY_BATCH;
+    const description = algorithmDescription();
+    const figures = window.Ending.summary(
+      batch, window.Producer.snapshot,
+      description ? description.label : null);
+    ui.ending.show(figures, { canReplay: escapeRoute() !== null });
+    paintControls();
+    return true;
+  }
+
+  /** Dismiss the ending and hand the room back. */
+  function closeEnding() {
+    if (!ui.ending) return;
+    ui.ending.hide();
+    paintAll();
   }
 
   /* ---------------------------------------------------------------------
@@ -783,7 +1211,36 @@
      Painting
      ------------------------------------------------------------------- */
 
+  /**
+   * The current mission objective, for a room that has more than one.
+   *
+   * The stage comes off the frame being drawn, which came off the
+   * environment — so the line changes at the same instant the objective
+   * marker moves and the door unlocks, because all three read the same
+   * number. The wording is the room's (`definition.objectives`); this only
+   * indexes it.
+   */
+  function paintObjective() {
+    const names = ui.room && ui.room.objectives;
+    const detail = ui.lastDetail;
+    const stage = detail && detail.stage;
+    if (!names || typeof stage !== 'number' || !names[stage]) {
+      dom.strip.objective.hidden = true;
+      return;
+    }
+    dom.strip.objective.hidden = false;
+    dom.strip.objective.textContent = names[stage];
+    dom.strip.objective.dataset.stage = String(stage);
+  }
+
   function paintStrip() {
+    /* The environment settings are painted here as well as from the live
+       strip, because `paintLiveStrip` only runs while training is going. At
+       rest — which is what the player sees the moment the room opens, and
+       again after Reset — nothing was calling it, so the collapse probability
+       was blank exactly when someone would first look for it. */
+    paintEnvironment(window.Producer.snapshot);
+
     // While training is what is on screen, the strip counts episodes trained
     // rather than episodes replayed, and there is no batch to count anyway.
     if (!ui.trained) {
@@ -798,7 +1255,7 @@
       dom.strip.cleared.hidden = true;
       dom.strip.stale.hidden = !ui.stale;
       if (ui.stale) {
-        dom.strip.stale.textContent = ui.staleReason + ' — reset to apply';
+        dom.strip.stale.textContent = staleMessage();
       }
       return;
     }
@@ -834,7 +1291,7 @@
 
     dom.strip.stale.hidden = !ui.stale;
     if (ui.stale) {
-      dom.strip.stale.textContent = ui.staleReason + ' — reset to apply';
+      dom.strip.stale.textContent = staleMessage();
     }
   }
 
@@ -887,6 +1344,20 @@
     disable(dom.replayStep, false);
   }
 
+  /**
+   * What the stale banner says.
+   *
+   * A reason that already tells the player what to do is left alone; anything
+   * else gets the instruction appended. Without this the environment message
+   * read "Environment changed — retrain to update the policy — reset to
+   * apply", which is two instructions and one too many.
+   */
+  function staleMessage() {
+    const reason = ui.staleReason || 'Something changed';
+    if (/retrain|reset/i.test(reason)) return reason;
+    return reason + ' — reset to apply';
+  }
+
   /** Disabled is the real attribute; aria-disabled only describes it. */
   function disable(node, off) {
     node.disabled = Boolean(off);
@@ -895,11 +1366,13 @@
 
   function paintAll() {
     paintStrip();
+    paintObjective();
     paintControls();
+    paintGeneralisation();
     paintEpisodeDetail();
     paintFinalRouteHint();
     paintInspector();
-    if (ui.repaintCharts) ui.repaintCharts(ui.playback.metrics);
+    if (ui.repaintCharts) ui.repaintCharts(chartData());
   }
 
   /* ---------------------------------------------------------------------
@@ -915,6 +1388,55 @@
      look at. Replaying a particular episode afterwards is a separate thing
      — see `ui.playback`, which owns that and nothing else now.
      ------------------------------------------------------------------- */
+
+  /**
+   * The live frame's detail, with the activation flourish counted in.
+   *
+   * A replay can look backwards through the frames it recorded to find when
+   * the mission stage changed; the live view has no such history, so the
+   * transition is noticed as it goes past and counted from there. Either way
+   * the count starts on the frame where the *environment* first reported the
+   * new stage — nothing here decides that an activation happened.
+   *
+   * The counter resets whenever the stage goes back to 0, which is every new
+   * episode that starts before the terminal.
+   */
+  function liveDetail(scene) {
+    const detail = scene.detail;
+    if (!detail || typeof detail.stage !== 'number') return detail || null;
+
+    if (ui.liveStage !== detail.stage) {
+      // Only a change *into* a later stage is an activation. Dropping back to
+      // stage 0 is a new episode beginning, not the terminal un-activating.
+      ui.liveSince = (ui.liveStage !== null && detail.stage > ui.liveStage)
+        ? 0 : null;
+      ui.liveStage = detail.stage;
+    } else if (ui.liveSince !== null) {
+      ui.liveSince += 1;
+    }
+    return Object.assign({}, detail, { sinceActivation: ui.liveSince });
+  }
+
+  /**
+   * Play the collapse sound on the frame a bridge section fails.
+   *
+   * `collapseAgo` is 0 on exactly the frame it happened, so the sound is tied
+   * to the recording rather than to a wall clock — it lands with the shake and
+   * on the same step every time the episode is replayed. `lastCollapse` stops
+   * a held frame or a repaint from playing it twice, and `Impact` itself is
+   * idempotent within a tenth of a second as a second line of defence.
+   */
+  function soundCollapse(snapshot) {
+    const ago = snapshot && snapshot.collapseAgo;
+    if (ago !== 0) {
+      // Away from the collapse frame, so the next one may sound again.
+      if (ago === null || ago === undefined || ago > 1) ui.lastCollapse = false;
+      return;
+    }
+    if (ui.lastCollapse) return;
+    ui.lastCollapse = true;
+    if (window.Impact) window.Impact.collapse();
+  }
 
   /** The live world, in the shape the renderer draws frames in. */
   function liveSnapshot() {
@@ -938,6 +1460,28 @@
       position: scene.position,
       entityStates: states,
       entityPositions: moved,
+      /* A continuous room reports a velocity with the moment; the three grid
+         rooms report null and the renderer takes its usual branch. This is the
+         same field a recorded frame carries, which is the property that lets
+         one renderer draw both. */
+      /* The warehouse as it stands now. Null in every room whose furniture
+         does not move, and the renderer falls back to the room's own list. */
+      entities: scene.entities || null,
+      /* The same field a recorded frame carries, for the live view: the
+         mission stage, the sensors and the visible obstacles. Sending it from
+         the far end rather than deriving it here is what makes the sensor fan
+         drawn during training identical to the one drawn in a replay. */
+      detail: liveDetail(scene),
+      velocity: scene.velocity || null,
+      facing: scene.facing === undefined ? null : scene.facing,
+      landingSpeed: ui.room.landingSpeed,
+      speedLimit: ui.room.speedLimit,
+      /* Live, the clock may as well be the step count the server reports: it
+         advances with the simulation rather than with the frame rate, so the
+         fans turn at a speed that means something. Pinned under reduced
+         motion, exactly as in playback. */
+      phase: window.matchMedia('(prefers-reduced-motion: reduce)').matches
+        ? 0 : (scene.steps || 0) * 0.16,
     };
   }
 
@@ -951,11 +1495,22 @@
     let options = null;
 
     if (speed.animated) {
-      // Steps are owed at a rate per *second*. A frame is not a unit the
-      // simulation cares about, and asking for a whole step on every frame
-      // would make the slowest speed twenty times too fast at 60fps — so the
-      // fraction is carried over rather than rounded away.
-      ui.owed += speed.stepsPerSecond * dt;
+      /* Steps are owed at a rate per *second*. A frame is not a unit the
+         simulation cares about, and asking for a whole step on every frame
+         would make the slowest speed twenty times too fast at 60fps — so the
+         fraction is carried over rather than rounded away.
+
+         The rate is scaled by whatever the room says one of its steps is
+         worth, because "steps per second" does not mean the same thing in
+         every room. A step in a grid room moves the agent a whole cell; a step
+         in the wind tunnel is 0.02 s of flight and moves it a five-hundredth
+         of the chamber, so the tiers on their own leave it apparently
+         motionless. The number comes from the room definition, so the pace of
+         a room stays the room's business — see `rooms.py`. Absent, it is 1,
+         which is every grid room and is what they had before. */
+      const room = ui.room;
+      const scale = (room && room.playback && room.playback.liveStepScale) || 1;
+      ui.owed += speed.stepsPerSecond * scale * dt;
       const steps = Math.floor(ui.owed);
       if (steps >= 1) {
         ui.owed -= steps;
@@ -975,8 +1530,11 @@
       }).catch(failed);
     }
 
-    ui.world.draw(liveSnapshot());
+    const live = liveSnapshot();
+    ui.world.draw(live);
+    ui.lastDetail = live && live.detail;
     paintLiveStrip();
+    paintObjective();
     refreshRecordings(now);
 
     ui.liveFrame = window.requestAnimationFrame(liveTick);
@@ -1007,7 +1565,7 @@
       buildEpisodeList();
       buildInspectorEpisodes();
       paintInspector();
-      if (ui.repaintCharts) ui.repaintCharts(batch.metrics);
+      if (ui.repaintCharts) ui.repaintCharts(batch);
     }).catch(() => { ui.fetchingBatch = false; });
   }
 
@@ -1057,7 +1615,7 @@
         buildInspectorEpisodes();
         // The recording's own metrics, not the played count — nothing has been
         // played back yet, and the graphs are about what happened in training.
-        if (ui.repaintCharts) ui.repaintCharts(batch.metrics);
+        if (ui.repaintCharts) ui.repaintCharts(batch);
         // Straight to the learned route, rather than to the top of a batch of
         // exploratory episodes. Selecting it is what puts playback into
         // REPLAYING, so Play and Pause drive that one route on a loop.
@@ -1065,6 +1623,10 @@
         // Now the world belongs to the playback controller, so its loop starts.
         ui.playback.start();
         paintAll();
+        /* The payoff, at the moment it is earned: the last chamber, escaped.
+           `maybeShowEnding` stops the playback loop it just started, which is
+           correct — the overlay is what is being looked at now. */
+        maybeShowEnding();
       }).catch(failed);
   }
 
@@ -1109,8 +1671,11 @@
       failed(problem);
       return;
     }
-    ui.world.draw(liveSnapshot());
+    const stepped = liveSnapshot();
+    ui.world.draw(stepped);
+    ui.lastDetail = stepped && stepped.detail;
     paintLiveStrip();
+    paintObjective();
     paintControls();
   }
 
@@ -1129,6 +1694,32 @@
       dom.strip.metric.textContent = metric.label + ' '
                                    + Number(metric.value).toFixed(1);
     }
+    paintEnvironment(snapshot);
+  }
+
+  /**
+   * The environment settings in force, in the status strip.
+   *
+   * Room 2's subject is a risk/return trade and the risk is a slider, so a
+   * mean reward with no indication of the collapse probability that produced
+   * it cannot be compared with anything. The value comes from the readout the
+   * far end builds, which reads the *environment* rather than the stored
+   * parameter — so a slider that has been moved but not yet applied shows the
+   * value actually being trained against, not the pending one.
+   *
+   * Silent in every room that has no such setting.
+   */
+  function paintEnvironment(snapshot) {
+    if (!dom.strip.environment) return;
+    const rows = (snapshot && snapshot.readout) || [];
+    let shown = '';
+    rows.forEach(pair => {
+      if (pair[0] === 'Bridge collapse probability') {
+        shown = 'Collapse probability ' + pair[1];
+      }
+    });
+    dom.strip.environment.textContent = shown;
+    dom.strip.environment.hidden = shown === '';
   }
 
   /* ---------------------------------------------------------------------
@@ -1187,6 +1778,11 @@
     // The route belonged to the policy that was just thrown away. Keeping it
     // would leave the previous run's route on screen beside a fresh chamber.
     ui.greedy = null;
+    ui.testedRoom = null;
+    // A fresh run has not been escaped yet, so the ending is owed again.
+    ui.endingSeen = false;
+    ui.clearedFlashSeen = false;
+    if (ui.clearedFlash) ui.clearedFlash.hide();
     ui.lastBatchAt = 0;
 
     buildLegend();
@@ -1194,6 +1790,8 @@
     buildAlgorithmInfo();
     buildEpisodeList();
     buildInspectorEpisodes();
+    buildGeneralisation();
+    paintEvaluation(null);
     if (ui.repaintCharts) ui.repaintCharts([]);
     refit();
     paintAll();
@@ -1217,12 +1815,29 @@
   function leave() {
     if (ui.leaving) return;
 
+    /* The last chamber ends the story rather than returning to the select.
+       Shown here rather than navigated past, so Exit on a cleared final room
+       reaches the ending instead of the menu. */
+    if (maybeShowEnding()) return;
+
     const unfinished = (ui.playback && ui.playback.inProgress) || ui.running;
     if (unfinished
         && !window.confirm('This run has not finished. Leaving discards it.')) {
       return;
     }
 
+    goToChamberSelect();
+  }
+
+  /**
+   * Hand the run back and navigate to the chamber select.
+   *
+   * Split out of `leave` because the ending's Main Menu button has to do the
+   * identical thing — including reporting the chamber as cleared, which is
+   * what unlocks progress. Two copies of that would eventually have differed,
+   * and the copy that forgot would silently lose the player's progress.
+   */
+  function goToChamberSelect() {
     ui.leaving = true;
     // Both loops stopped before navigating, so nothing is still drawing into
     // a canvas that is about to go away.
@@ -1259,6 +1874,9 @@
   dom.play.addEventListener('click', togglePlay);
   dom.step.addEventListener('click', stepOnce);
   dom.reset.addEventListener('click', reset);
+  dom.evaluate.addEventListener('click', runEvaluation);
+  dom.testRoom.addEventListener('click', runTestRoom);
+  dom.anotherTestRoom.addEventListener('click', runTestRoom);
   dom.finalRoute.addEventListener('click', showFinalRoute);
   dom.toggle.addEventListener('click', () => setSidebar(!ui.open));
   dom.exit.addEventListener('click', leave);
@@ -1289,6 +1907,12 @@
   dom.inspectForward.addEventListener('click', () => stepInspector(1));
 
   document.addEventListener('keydown', event => {
+    /* While the ending is up it owns the keyboard: its own buttons are
+       focusable and tabbable, and none of the room's shortcuts should reach
+       past it. Escape in particular would otherwise navigate to the chamber
+       select from behind the overlay. */
+    if (ui.ending && ui.ending.isOpen) return;
+
     const tag = (event.target.tagName || '').toLowerCase();
     // Never hijack a key while the player is inside a control.
     if (tag === 'input' || tag === 'select' || tag === 'textarea') {
@@ -1359,6 +1983,12 @@
     ui.playback = P.create({
       frame: function (snapshot) {
         ui.world.draw(snapshot);
+        ui.lastDetail = snapshot && snapshot.detail;
+        paintObjective();
+        soundCollapse(snapshot);
+        // The frame R-5 finishes arriving is a frame, not an episode boundary
+        // and not a strip repaint — so this is asked here, where frames are.
+        maybeFlashCleared();
 
         // A completed episode changes the strip, the charts and the lists,
         // but Turbo completes many of them between two frames — so the
@@ -1371,7 +2001,7 @@
           buildEpisodeList();
           buildInspectorEpisodes();
           paintInspector();
-          if (ui.repaintCharts) ui.repaintCharts(ui.playback.metrics);
+          if (ui.repaintCharts) ui.repaintCharts(chartData());
         }
 
         if (dom.scrub && !dom.scrub.hidden) {
@@ -1383,9 +2013,49 @@
     });
 
     buildSpeeds();
-    ui.repaintCharts = window.Charts.build(dom.charts);
     // Its own run on the far end, so comparing never disturbs this one.
     ui.compare = window.Compare.mount(dom.compare, number);
+    ui.clearedFlash = window.Cleared.mount(dom.cleared);
+
+    /* The ending sequence. Mounted for every room and shown by none but the
+       last: `maybeShowEnding` checks `room.isFinal`, which only the final
+       chamber sends. The four buttons are wired here because what each of
+       them means belongs to the screen that owns the run — the module draws
+       and animates, and navigates nothing itself. */
+    ui.ending = window.Ending.mount(dom.ending, {
+      /* The recorded escape, replayed through the ordinary path: the same
+         frames, renderer and transport controls as any other episode. */
+      replay: function () {
+        const index = escapeRoute();
+        closeEnding();
+        if (index === null) return;
+        ui.playback.selectEpisode(index);
+        ui.playback.start();
+        paintAll();
+      },
+      /* The graphs of the run that produced it. The section is opened rather
+         than anything being rebuilt — it has been filled in all along. */
+      results: function () {
+        closeEnding();
+        const charts = dom.charts.closest('details');
+        if (charts) charts.open = true;
+        if (dom.generalisation && !dom.generalisation.hidden) {
+          dom.generalisation.open = true;
+        }
+        if (!ui.open) setSidebar(true);
+        if (charts) charts.scrollIntoView({ block: 'nearest' });
+      },
+      /* A fresh run of the same chamber, which is exactly what Reset is. */
+      again: function () {
+        closeEnding();
+        reset();
+      },
+      menu: function () {
+        closeEnding();
+        goToChamberSelect();
+      },
+    });
+
     dom.strip.state.textContent = 'Opening';
     paintControls();
 
@@ -1403,6 +2073,12 @@
       ui.parameters[specification.key] = specification.default;
     });
 
+    /* Built here rather than before the room arrives, because a room may name
+       its own graphs. Rooms 1 to 4 name none and get the shared four; room 5
+       declares ten, including the one that compares the frozen policy on the
+       layouts it trained on against the layouts it never saw. */
+    ui.repaintCharts = window.Charts.build(dom.charts, ui.room.charts);
+
     // An empty batch, on purpose: nothing has been learned yet. The renderer
     // draws a room with no episode in it perfectly well — the chamber, its
     // legend and what it says about itself are all up immediately, and there
@@ -1415,6 +2091,7 @@
     buildAlgorithmInfo();
     buildEpisodeList();
     buildInspectorEpisodes();
+    buildGeneralisation();
 
     // Open, not closed. Everything that makes the chamber legible — what it
     // is, its parameters, its graphs — lives in there, and a screen that

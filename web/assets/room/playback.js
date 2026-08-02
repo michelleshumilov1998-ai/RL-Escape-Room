@@ -109,6 +109,8 @@ window.Playback = (function () {
       self.selected = null;
       self.metrics = [];
       self.hold = 0;
+      // A new batch has been watched by nobody yet.
+      self.witnessed = false;
       if (on.state) on.state(self.state);
     }
 
@@ -145,6 +147,28 @@ window.Playback = (function () {
 
     /** Record an episode's metrics once, as it completes. */
     function completeEpisode(index) {
+      /* An escape has now been WATCHED, not merely recorded.
+         This is the moment the cursor has walked an episode all the way to
+         its last step, so if that episode reached the goal the robot has
+         been drawn arriving there and has stopped. `witnessed` is what the
+         Mission Complete overlay waits for — see the note on `arrived`.
+
+         It is latched here rather than polled because the streaming cursor
+         does not hold the final step of a mid-batch episode: it banks the
+         episode and moves straight on to the next one in the same tick, so
+         there is no frame at which a poll would see the robot standing on
+         the goal. This runs on that exact tick.
+
+         DELIBERATELY ABOVE THE METRICS GUARD
+         Room 1 is a planner: it records the one greedy walk as an episode
+         and no per-episode metrics at all, so `self.batch.metrics` is empty
+         and everything below returns immediately. Whether an escape was
+         watched has nothing to do with whether metrics were kept, and
+         putting this after the guard is what left room 1 unable to raise
+         Mission Complete however well it did. */
+      const episode = self.batch.episodes[index];
+      if (episode && episode.outcome === 'success') self.witnessed = true;
+
       const entry = self.batch.metrics[index];
       if (!entry) return;
       if (self.metrics.length && self.metrics[self.metrics.length - 1]
@@ -201,6 +225,23 @@ window.Playback = (function () {
       return rate ? rate / C.replayStepsPerSecond : 1;
     }
 
+    /**
+     * The selected speed chip, as a multiple of the default one.
+     *
+     * Normal returns exactly 1, so a room's declared replay rate *is* its
+     * Normal-speed rate and nothing about the default presentation moved when
+     * the chips were given power over replay. Turbo is not a rate at all —
+     * it consumes the batch rather than walking it — so replaying one episode
+     * under Turbo uses a fixed brisk multiple instead of skipping frames.
+     * Skipping is what would make the drone appear to teleport.
+     */
+    function tierScale() {
+      const tier = C.speeds[self.speed];
+      const base = C.speeds[C.speedDefault].stepsPerSecond;
+      if (!tier.animated || !base) return C.turboReplayScale;
+      return tier.stepsPerSecond / base;
+    }
+
     function runAnimated(dt) {
       const tier = C.speeds[self.speed];
       self.cursor.part += dt * tier.stepsPerSecond * paceScale();
@@ -254,10 +295,17 @@ window.Playback = (function () {
       // A room may set its own replay pace: a continuous room takes
       // hundreds of small steps to cross itself, and the rate that suits
       // ten cells would take minutes to get through one flight.
+      //
+      // Scaled by the selected speed tier, which it did not used to be —
+      // replaying one episode ran at the room's rate whatever the chips said,
+      // so choosing Slow to study a manoeuvre did nothing at all. The tier is
+      // normalised against the default one, so Normal is exactly the room's
+      // declared rate and the other chips are multiples of it. Every room's
+      // replay is therefore unchanged at the default tier.
       const rate = (self.room && self.room.playback
                     && self.room.playback.stepsPerSecond)
         || C.replayStepsPerSecond;
-      self.cursor.part += dt * rate;
+      self.cursor.part += dt * rate * tierScale();
       while (self.cursor.part >= 1) {
         self.cursor.part -= 1;
         self.cursor.step += 1;
@@ -266,6 +314,17 @@ window.Playback = (function () {
           self.cursor.step = episode.steps.length - 1;
           self.cursor.part = 0;
           self.hold = C.replayPauseSeconds;
+
+          /* The final stride has landed. If this replay was an escape, this
+             is the frame R-5 is standing on the exit having stopped moving —
+             which is what Mission Complete waits for.
+
+             Room 1 reaches its overlay only through here. Value Iteration is
+             a planner: the live agent never takes a step, so the one time R-5
+             is drawn crossing the chamber is this replay of the greedy route.
+             Latching only in `completeEpisode` therefore left the room able to
+             be solved but never able to say so. */
+          if (episode.outcome === 'success') self.witnessed = true;
           break;
         }
       }
@@ -344,6 +403,63 @@ window.Playback = (function () {
       return positions;
     }
 
+    /**
+     * How many recorded frames ago the mission stage last changed.
+     *
+     * Read backwards through the frames this episode actually recorded, and
+     * `null` when the stage has not changed within the episode. So it is a
+     * fact about the recording rather than about elapsed time: scrubbing to
+     * step 40 gives the same answer every time, and a replay shows the
+     * activation flourish on exactly the steps the live view showed it on.
+     *
+     * An episode that *began* in stage 1 — which a share of training episodes
+     * do, so the second half of the mission gets practised — never changed
+     * stage and correctly reports null. Nothing pulses, because nothing was
+     * activated.
+     */
+    function sinceActivation(episode, upTo) {
+      const steps = episode.steps;
+      const at = Math.min(upTo, steps.length - 1);
+      const stageAt = index => {
+        const detail = steps[index] && steps[index].detail;
+        return detail && typeof detail.stage === 'number' ? detail.stage : null;
+      };
+      if (stageAt(at) === null) return null;
+
+      for (let index = at; index > 0; index -= 1) {
+        if (stageAt(index) !== stageAt(index - 1)) return at - index;
+      }
+      return null;
+    }
+
+    /**
+     * How many recorded frames ago a bridge section gave way, or null.
+     *
+     * Every frame carries the absolute state of every plank (see
+     * `GridWorld.frame_extras`), so the frame a collapse happened on is the one
+     * where the number of collapsed sections went up. Walked backwards from the
+     * frame being shown, so it is a fact about the recording: the shake and the
+     * sound land on the same step every time the episode is watched, and
+     * scrubbing backwards past the collapse un-shakes it.
+     */
+    function collapseAgo(episode, upTo) {
+      const steps = episode.steps;
+      const at = Math.min(upTo, steps.length - 1);
+      const brokenAt = index => {
+        const step = steps[index];
+        if (!step || !step.entityStates) return 0;
+        let count = 0;
+        step.entityStates.forEach(entry => {
+          if (entry.state === 'collapsed') count += 1;
+        });
+        return count;
+      };
+      for (let index = at; index > 0; index -= 1) {
+        if (brokenAt(index) > brokenAt(index - 1)) return at - index;
+      }
+      return null;
+    }
+
     function statesFor(episode, upTo) {
       // Accumulated from the start of the episode: a plank that gave way
       // twenty steps ago has not come back.
@@ -366,9 +482,13 @@ window.Playback = (function () {
 
       return {
         room: self.room,
+        /* The layout this episode was recorded in, so a replay animates the
+           right trajectory through the right building rather than through
+           whichever warehouse happened to be current when the page opened. */
+        entities: episode.entities || null,
         position: position(episode),
         velocity: step.velocity || null,
-        facing: step.velocity ? headingOf(step) : null,
+        facing: step.velocity ? lastHeading(episode, index) : null,
         trail: trailFor(episode, self.cursor.step),
         entityStates: statesFor(episode, self.cursor.step),
         entityPositions: positionsFor(episode, self.cursor.step),
@@ -377,6 +497,33 @@ window.Playback = (function () {
           ? Object.assign({}, self.room.observation,
                           { heading: headingOf(step) })
           : null,
+        /* Whatever else the room recorded about this moment — room 5's mission
+           stage, its sensor readings and which obstacles were visible. Read
+           straight off the recorded step, never recomputed, which is what
+           makes the sensor fan in a replay the fan the agent actually had
+           rather than one worked out afterwards from where it ended up. */
+        /* Whatever else the room recorded about this moment, plus how long
+           ago the mission stage changed — which is counted off the recorded
+           frames rather than off a clock, so the activation flourish falls on
+           the same steps every time the episode is watched. */
+        detail: step.detail
+          ? Object.assign({}, step.detail,
+                          { sinceActivation: sinceActivation(
+                              episode, self.cursor.step) })
+          : null,
+        /* Frames since a bridge section failed, for the shake. Null when
+           nothing has, which is every room but room 2. */
+        collapseAgo: collapseAgo(episode, self.cursor.step),
+        /* The clock the decorative parts of the drawing run on. Taken from the
+           *step being shown* rather than from the wall clock, which is what
+           makes a replay reproducible: scrubbing back to step 40 draws exactly
+           the frame step 40 drew before. Reduced motion pins it, so fans and
+           lamps stand still and every arrow and warning stays put. */
+        phase: reducedMotion() ? 0 : index * 0.16,
+        // The room's own thresholds, for a drawing that wants to show them.
+        // Undefined in the three grid rooms, which carry no velocity either.
+        landingSpeed: self.room.landingSpeed,
+        speedLimit: self.room.speedLimit,
       };
     }
 
@@ -385,6 +532,25 @@ window.Playback = (function () {
       if (!step.velocity) return 0;
       if (step.velocity.x === 0 && step.velocity.y === 0) return 0;
       return Math.atan2(step.velocity.y, step.velocity.x);
+    }
+
+    /**
+     * The last heading that meant anything, at or before `index`.
+     *
+     * A drone that has come to rest has no direction in its velocity, and
+     * `atan2(0, 0)` is zero — which would swing it to point due east every
+     * time it stopped. Walking back to the last step that was actually moving
+     * keeps it pointing the way it arrived. Reads recorded frames only.
+     */
+    function lastHeading(episode, index) {
+      for (let at = index; at >= 0; at -= 1) {
+        const velocity = episode.steps[at].velocity;
+        if (!velocity) break;
+        if (Math.hypot(velocity.x, velocity.y) > 0.04) {
+          return Math.atan2(velocity.y, velocity.x);
+        }
+      }
+      return -Math.PI / 2;
     }
 
     /* -------------------------------------------------------------------
@@ -437,6 +603,47 @@ window.Playback = (function () {
       get speed() { return self.speed; },
       get episode() { return currentEpisode(); },
 
+      /**
+       * Whether R-5 is standing on the goal with its last move finished.
+       *
+       * WHY THIS EXISTS
+       * "The chamber has been cleared" and "the player has watched it be
+       * cleared" are different facts, and the Mission Complete overlay was
+       * raised on the first. A recorded episode reaches the goal during
+       * *training*, thousands of steps before anything is played back — so
+       * the overlay could arrive over a robot that was still walking, or
+       * before it had set off at all.
+       *
+       * This is the second fact, and all three parts of it are checked:
+       *   1. the episode being shown actually reached the goal,
+       *   2. the cursor is on its final step — the exit tile,
+       *   3. `part` has run out, so the interpolation between the last two
+       *      steps is complete and the robot has stopped moving.
+       *
+       * It is deliberately about the *displayed* episode. Selecting a failed
+       * episode in the replay browser makes this false again, which is right:
+       * what is on screen is then not an escape.
+       */
+      /**
+       * Whether an escape has been watched at any point in this batch.
+       *
+       * Latched by `completeEpisode` on the tick the cursor finishes walking
+       * a successful episode. This is what the Mission Complete overlay is
+       * gated on: `arrived` alone is never observable for a mid-batch
+       * episode, because the cursor does not hold its final step.
+       */
+      get witnessedEscape() { return Boolean(self.witnessed); },
+
+      get arrived() {
+        const episode = currentEpisode();
+        if (!episode || !episode.steps || !episode.steps.length) return false;
+        if (episode.outcome !== 'success') return false;
+        const last = episode.steps.length - 1;
+        // `part` is the fraction walked between two steps. Zero at the last
+        // one means the final stride has landed.
+        return self.cursor.step >= last && self.cursor.part <= 0.0001;
+      },
+
       /** How many episodes the batch holds at all. */
       get total() {
         return self.batch ? self.batch.episodes.length : 0;
@@ -472,6 +679,7 @@ window.Playback = (function () {
         return {
           snapshot: {
             room: self.room,
+            entities: episode.entities || null,
             position: { x: step.position.x, y: step.position.y },
             trail: trailFor(episode, at),
             entityStates: statesFor(episode, at),
@@ -480,7 +688,24 @@ window.Playback = (function () {
               ? Object.assign({}, self.room.observation,
                               { heading: headingOf(step) })
               : null,
-            facing: step.velocity ? headingOf(step) : null,
+            detail: step.detail
+              ? Object.assign({}, step.detail,
+                              { sinceActivation: sinceActivation(episode, at) })
+              : null,
+            // A still is held, not played, so it never shakes.
+            collapseAgo: null,
+            /* THE STILL HAS TO BE THE SAME MACHINE AS THE WORLD VIEW
+               The renderer picks the drone form when a snapshot carries a
+               velocity and the walking chassis when it does not — and this
+               was not passing one. So rooms 4 and 5 drew R-5 in its drone
+               frame in the world and as the old walking robot in the step
+               inspector beside it, which is the mismatch that was reported.
+               Read straight off the recorded frame, like everything else here. */
+            velocity: step.velocity || null,
+            /* And the same facing rule as the world view: the last heading
+               that meant anything, so a drone that has come to rest keeps
+               pointing the way it arrived instead of snapping due east. */
+            facing: step.velocity ? lastHeading(episode, at) : null,
           },
           episode: episode,
           step: step,

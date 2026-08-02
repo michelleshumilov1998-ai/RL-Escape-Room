@@ -201,9 +201,31 @@ window.Renderer = (function () {
     },
 
     /** Which entities belong in the legend, in definition order. */
-    legend() {
+    /**
+     * The key — for the chamber on screen, not for the whole game.
+     *
+     * It used to list every entity in `config.ENTITIES` that asks to be in a
+     * legend, which is all thirty of them: room 1's key named the storage
+     * shelves, the security drones, the blast door, the turbine housings and
+     * the ventilation fans, none of which are anywhere in room 1. Thirty rows
+     * down the side of a ten-cell chamber, most of them describing other
+     * rooms.
+     *
+     * `layout` is the grid this screen is drawing, so the kinds actually
+     * present can be counted off it. The agent is added because it is never a
+     * tile and is always on screen. Given no layout it falls back to the old
+     * behaviour rather than showing an empty key.
+     */
+    legend(layout) {
+      let wanted = null;
+      if (layout && layout.tiles) {
+        wanted = new Set();
+        layout.tiles.forEach(row => row.forEach(kind => wanted.add(kind)));
+        wanted.add('agent');
+      }
       return Object.keys(entities)
         .filter(kind => entities[kind].in_legend)
+        .filter(kind => wanted === null || wanted.has(kind))
         .map(kind => ({
           kind: kind,
           label: entities[kind].label,
@@ -302,21 +324,49 @@ window.Renderer = (function () {
         }
       }
 
-      // Where a replay has already been.
+      /* Where a replay has already been.
+
+         BROKEN AT EVERY JUMP, NOT DRAWN AS ONE POLYLINE
+         Two things in this chamber move the agent somewhere it did not walk:
+         a teleport pad, which sends it to the other pad, and a beam, which
+         throws it back to the door it came in by. Joining those two cells with
+         a straight line drew a long diagonal streak across a dozen cells the
+         agent never entered — which is the trajectory "spilling into
+         neighbouring cells" that was reported. It was not a rounding problem;
+         the line was describing a walk that never happened.
+
+         So a segment is only drawn between cells that are orthogonally
+         adjacent — which is the only kind of move a step can make. A jump
+         leaves a gap in the trail, which is the truth about it. */
       if (scene.trail && scene.trail.length > 1) {
         ctx.save();
         ctx.strokeStyle = colours.accent;
         ctx.globalAlpha = 0.35;
         ctx.lineWidth = Math.max(1.5, view.cell * 0.08);
         ctx.lineJoin = 'round';
-        ctx.beginPath();
-        scene.trail.forEach((cell, index) => {
+        ctx.lineCap = 'round';
+
+        const centre = cell => {
           const box = cellRect(cell[0], cell[1]);
-          const x = box.x + box.size / 2;
-          const y = box.y + box.size / 2;
-          if (index === 0) ctx.moveTo(x, y);
-          else ctx.lineTo(x, y);
-        });
+          return { x: box.x + box.size / 2, y: box.y + box.size / 2 };
+        };
+        const walked = (one, two) => {
+          const rows = Math.abs(one[0] - two[0]);
+          const cols = Math.abs(one[1] - two[1]);
+          // One cell, orthogonally — or standing still, which a wall bump is.
+          return rows + cols <= 1;
+        };
+
+        ctx.beginPath();
+        for (let index = 1; index < scene.trail.length; index += 1) {
+          const from = scene.trail[index - 1];
+          const to = scene.trail[index];
+          if (!walked(from, to)) continue;      // a jump: no line for it
+          const a = centre(from);
+          const b = centre(to);
+          ctx.moveTo(a.x, a.y);
+          ctx.lineTo(b.x, b.y);
+        }
         ctx.stroke();
         ctx.restore();
       }
@@ -324,9 +374,31 @@ window.Renderer = (function () {
       // The agent, at whatever fractional position it was handed.
       if (scene.agent) {
         const box = cellRect(scene.agent.row, scene.agent.col);
-        window.Shapes.agent(ctx,
-                            { x: box.x + box.size / 2, y: box.y + box.size / 2 },
-                            box.size * 0.62, null, colours);
+        const centre = { x: box.x + box.size / 2, y: box.y + box.size / 2 };
+
+        /* A skid, on the one step where the floor overruled the plan.
+           The policy arrow in this cell points where the action was aimed and
+           R-5 has gone somewhere else, and without saying so that reads as a
+           drawing fault rather than as ice. Drawn under the agent, in the
+           hazard tone, as two short arcs — the mark a slide leaves. */
+        if (scene.slipped) {
+          ctx.save();
+          ctx.strokeStyle = colours.hazard;
+          ctx.globalAlpha = 0.85;
+          ctx.lineWidth = Math.max(1.4, box.size * 0.055);
+          ctx.lineCap = 'round';
+          const reach = box.size * 0.34;
+          [-1, 1].forEach(side => {
+            ctx.beginPath();
+            ctx.arc(centre.x, centre.y, reach,
+                    side > 0 ? -0.55 : Math.PI - 0.55,
+                    side > 0 ? 0.55 : Math.PI + 0.55);
+            ctx.stroke();
+          });
+          ctx.restore();
+        }
+
+        window.Shapes.agent(ctx, centre, box.size * 0.62, null, colours);
       }
     },
 

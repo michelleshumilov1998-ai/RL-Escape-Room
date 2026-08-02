@@ -1,0 +1,242 @@
+/* =====================================================================
+   The ending screen.
+
+   Deliberately the start screen's stylesheet with a different centred
+   column in it: the same vignette over a moving canvas, the same thin
+   uppercase type in --title, the same ghost buttons lit and breathing.
+   The two screens are the bookends of one story and are meant to read as
+   the same place.
+
+   Everything here is either a token from base.css or a value derived from
+   one. No colour is written down; --accent, --goal, --title and --base do
+   all of it, so the ending follows the palette like every other screen.
+
+   It is an overlay rather than a page because the finished run has to be
+   alive behind it — see the note in `web/room/index.html`.
+   ===================================================================== */
+
+.ending {
+  position: fixed;
+  inset: 0;
+  z-index: 40;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 2rem;
+  background: var(--base);
+  /* Faded in by `ending.js` once its first frame has been drawn, so the
+     overlay never appears over an empty canvas. */
+  opacity: 0;
+  transition: opacity 900ms ease;
+}
+
+.ending.is-open { opacity: 1; }
+
+.ending[hidden] { display: none; }
+
+/* The animation, behind the type. Dimmer than the start screen's, because
+   this scene ends in darkness on purpose and the type has to survive the
+   brightest part of it near the beginning. */
+#ending-scene {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  opacity: 0.62;
+  pointer-events: none;
+  z-index: 0;
+}
+
+/* The same pool of base colour under the middle as the start screen, and
+   for the same reason: the type has to hold its contrast whatever the
+   animation is doing behind it. Slightly deeper here, because this column
+   is much taller than "Project R-5" and two buttons. */
+.ending::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  pointer-events: none;
+  background: radial-gradient(ellipse 74% 64% at 50% 50%,
+              color-mix(in srgb, var(--base) 74%, transparent) 0%,
+              color-mix(in srgb, var(--base) 48%, transparent) 52%,
+              color-mix(in srgb, var(--base) 0%, transparent) 82%);
+}
+
+/* ---- the centred column -------------------------------------------- */
+
+.ending-stage {
+  position: relative;
+  z-index: 2;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  gap: clamp(0.9rem, 2vh, 1.5rem);
+  max-width: 44rem;
+  /* Scrolls on a short window rather than clipping the buttons off the
+     bottom, which is the one thing this screen must never do. */
+  max-height: 100%;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+/* "PROJECT R-5", small and tracked out — the sector labels of every other
+   screen, reused as the story's byline. */
+.ending-eyebrow {
+  margin: 0;
+  font-size: clamp(0.62rem, 0.9vw, 0.74rem);
+  letter-spacing: 0.42em;
+  text-transform: uppercase;
+  color: var(--hairline);
+}
+
+/* The start screen's title, at the start screen's weight and tracking.
+   The negative right margin cancels the tracking off the last letter so
+   the words stay optically centred, exactly as `.title` does. */
+.ending-title {
+  margin: 0 -0.24em 0 0;
+  font-size: clamp(1.7rem, 5.4vw, 3.9rem);
+  font-weight: 200;
+  letter-spacing: 0.24em;
+  text-transform: uppercase;
+  line-height: 1.06;
+  color: var(--title);
+  text-shadow: 0 0 26px color-mix(in srgb, var(--accent) 26%, transparent);
+}
+
+.ending-lead {
+  margin: 0;
+  font-size: clamp(0.82rem, 1.2vw, 0.98rem);
+  line-height: 1.6;
+  color: var(--muted);
+}
+
+/* The three status lines, as a terminal readout rather than prose: this is
+   the laboratory reporting what happened, and it is green because all three
+   are systems that ended up in the state R-5 wanted them in. */
+.ending-log {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  font-family: var(--mono);
+  font-size: clamp(0.66rem, 0.95vw, 0.76rem);
+  letter-spacing: 0.08em;
+  color: color-mix(in srgb, var(--goal), var(--muted) 34%);
+}
+
+/* A tick before each, drawn in type so it needs no asset. */
+.ending-log li::before {
+  content: "✓";
+  margin-right: 0.6em;
+  color: var(--goal);
+}
+
+/* ---- the run's statistics ------------------------------------------- *
+   A definition list, laid out as a row of columns with hairlines between
+   them. Built by `ending.js` from the run that just finished; a figure the
+   run does not have is not invented, it is left as an em dash.          */
+
+.ending-stats {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 0 clamp(1.1rem, 3vw, 2.4rem);
+  margin: clamp(0.3rem, 1vh, 0.8rem) 0 0;
+  padding: 0.9rem 0 0;
+  border-top: 1px solid var(--hairline-faint);
+  width: 100%;
+}
+
+.ending-stats div {
+  display: flex;
+  flex-direction: column;
+  gap: 0.3rem;
+  min-width: 6rem;
+}
+
+.ending-stats dt {
+  font-size: clamp(0.56rem, 0.8vw, 0.64rem);
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
+  color: var(--hairline);
+}
+
+.ending-stats dd {
+  margin: 0;
+  font-family: var(--mono);
+  font-size: clamp(0.86rem, 1.4vw, 1.1rem);
+  color: var(--accent);
+}
+
+/* A figure the run does not have. Stated, never guessed at. */
+.ending-stats dd.is-absent { color: var(--hairline-soft); }
+
+/* ---- the four ways on ----------------------------------------------- */
+
+.ending-actions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: clamp(0.5rem, 1.4vh, 0.9rem);
+  margin-top: clamp(0.6rem, 2vh, 1.4rem);
+  width: 100%;
+}
+
+/* One column on a narrow window, because two of these labels are three
+   words long and would otherwise wrap into two lines each. */
+@media (max-width: 34rem) {
+  .ending-actions { grid-template-columns: minmax(0, 1fr); }
+}
+
+.ending-btn {
+  font-size: clamp(0.66rem, 0.95vw, 0.78rem);
+  padding: 0.95em 1.4em;
+}
+
+/* Lit from the start and breathing, exactly as on the start screen and for
+   the same reason: these are the only interactive things on a field that is
+   itself moving, and an unlit hairline is lost in it. The keyframes are
+   `breathe` from start.css, redeclared here because the two screens do not
+   share a stylesheet. */
+.ending-actions .btn {
+  border-color: color-mix(in srgb, var(--accent) 42%, var(--hairline));
+  box-shadow: 0 0 14px -3px color-mix(in srgb, var(--accent) 40%, transparent),
+              inset 0 0 12px -8px color-mix(in srgb, var(--accent) 30%, transparent);
+  animation: ending-breathe 4.8s ease-in-out infinite;
+}
+
+/* Staggered, so the four do not throb in unison. */
+.ending-actions .btn:nth-child(2) { animation-delay: -1.2s; }
+.ending-actions .btn:nth-child(3) { animation-delay: -2.4s; }
+.ending-actions .btn:nth-child(4) { animation-delay: -3.6s; }
+
+.ending-actions .btn:hover:not(:disabled),
+.ending-actions .btn:focus-visible {
+  border-color: var(--accent);
+  box-shadow: 0 0 22px -2px color-mix(in srgb, var(--accent) 62%, transparent),
+              inset 0 0 18px -8px color-mix(in srgb, var(--accent) 46%, transparent);
+  /* Held bright rather than pulsing while it is being pointed at. */
+  animation: none;
+}
+
+@keyframes ending-breathe {
+  0%, 100% {
+    box-shadow: 0 0 12px -4px color-mix(in srgb, var(--accent) 32%, transparent),
+                inset 0 0 12px -9px color-mix(in srgb, var(--accent) 24%, transparent);
+  }
+  50% {
+    box-shadow: 0 0 20px -2px color-mix(in srgb, var(--accent) 52%, transparent),
+                inset 0 0 16px -8px color-mix(in srgb, var(--accent) 38%, transparent);
+  }
+}
+
+/* Still lit, just no longer breathing — and the overlay appears at once
+   rather than fading. `ending.js` draws a single settled frame instead of
+   animating; see `reducedMotion` there. */
+@media (prefers-reduced-motion: reduce) {
+  .ending { transition: none; }
+  .ending-actions .btn { animation: none; }
+}

@@ -68,7 +68,7 @@ def wanted_episodes(target, budget):
     return {index for index in chosen if 0 <= index < target}
 
 
-def frame(env, action_names, state, reward, action):
+def frame(env, action_names, state, reward, action, slipped=False):
     """One frame of one episode: a picture of the whole world at a moment.
 
     A module function rather than a method, because a frame is a fact about
@@ -82,7 +82,7 @@ def frame(env, action_names, state, reward, action):
     # owns that knowledge; a frame only forwards it.
     entity_states, positions = env.frame_extras(state)
 
-    return {
+    built = {
         "position": env.world_position(state),
         # A grid room has no velocity and answers None; room 4's state carries
         # one, and the renderer uses it to point the drone the way it is going.
@@ -92,7 +92,24 @@ def frame(env, action_names, state, reward, action):
         "action": None if action is None else action_names[action],
         "entityStates": entity_states,
         "entityPositions": positions,
+        # Whether the floor overruled the action on this step.
+        #
+        # WHY A FRAME HAS TO CARRY THIS
+        # Room 1's policy arrow is the action the plan *tried*; on ice the
+        # agent slides sideways instead, which is the room's whole model. With
+        # nothing on the frame to say so, the arrow and the movement simply
+        # disagreed and it read as a rendering bug. The environment has always
+        # reported it in `info`; it just never reached the screen.
+        "slipped": bool(slipped),
     }
+
+    # A room that has more to say about the moment says it here. Room 5 carries
+    # the mission stage, the objective, what the sensors returned and which
+    # obstacles were visible — the things that make a replay inspectable rather
+    # than merely watchable. Every other room offers no hook and is unchanged.
+    if hasattr(env, "frame_detail"):
+        built["detail"] = env.frame_detail(state)
+    return built
 
 
 class Recorder:
@@ -126,6 +143,26 @@ class Recorder:
         self.current = {
             "index": index,
             "epsilon": epsilon,
+            # Which generated layout this episode was flown in. The assignment
+            # requires a replay to reproduce the original layout, and the seed
+            # is what makes that checkable: regenerate from it and the geometry
+            # must match the `entities` recorded beside it.
+            "layoutSeed": (self.env.layout.get("seed")
+                           if isinstance(getattr(self.env, "layout", None), dict)
+                           else None),
+            "split": getattr(self.env, "split", None),
+            # Room 2's bridge risk, straight off the world. An episode that
+            # does not say what it was recorded under cannot be compared with
+            # one that was recorded under something else.
+            "collapseChance": (float(self.env.collapse)
+                               if hasattr(self.env, "collapse") else None),
+            # The warehouse this episode happened in. Rooms whose furniture
+            # never moves send nothing and the page keeps using the room's own
+            # entity list; room 5's changes every episode, so a replay that did
+            # not carry it would animate the right trajectory through the wrong
+            # building.
+            "entities": (self.env.entities()
+                         if getattr(self.env, "layout_varies", False) else None),
             # The starting position is a step with nothing having happened
             # yet, so the first frame draws the agent where it began.
             "steps": [self._frame(state, 0.0, None)],
@@ -142,7 +179,9 @@ class Recorder:
         """
         if self.current is None:
             return
-        self.current["steps"].append(self._frame(state, reward, action))
+        self.current["steps"].append(
+            self._frame(state, reward, action,
+                        bool((info or {}).get("slipped"))))
         error = (report or {}).get("tdError")
         if error is not None:
             self.current["errors"].append(abs(error))
@@ -154,6 +193,10 @@ class Recorder:
         errors = self.current["errors"]
         episode = {
             "index": self.current["index"],
+            "entities": self.current["entities"],
+            "layoutSeed": self.current["layoutSeed"],
+            "split": self.current["split"],
+            "collapseChance": self.current["collapseChance"],
             "steps": self.current["steps"],
             "totalReward": total_reward,
             "outcome": outcome,
@@ -178,8 +221,9 @@ class Recorder:
 
     # ------------------------------------------------------------------
 
-    def _frame(self, state, reward, action):
-        return frame(self.env, self.action_names, state, reward, action)
+    def _frame(self, state, reward, action, slipped=False):
+        return frame(self.env, self.action_names, state, reward, action,
+                     slipped)
 
     def batch(self):
         """The whole recording, in the order it happened."""

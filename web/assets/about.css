@@ -1,0 +1,348 @@
+/* =====================================================================
+   ABOUT — the slide presentation.
+
+   The project's sidebar language, laid out as slides: the same small caps
+   headings, the same hairlines, the same mono face for machine facts. No
+   colour is introduced; --accent, --goal, --title and --muted do all of it.
+   ===================================================================== */
+
+.about {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  display: flex;
+  flex-direction: column;
+  background: var(--base);
+  opacity: 0;
+  transition: opacity 400ms ease;
+}
+
+.about.is-open { opacity: 1; }
+.about[hidden] { display: none; }
+
+/* ---- the laboratory, out of focus, behind everything ---------------- *
+   The panel used to sit on flat black, which made it a document on a
+   screen rather than a briefing inside the building.  This is the room
+   behind the glass: a structural grid and a few equipment glows, blurred
+   far enough that it is atmosphere and never competes with the type.
+
+   Drawn entirely with gradients — no image is loaded, and no colour is
+   introduced that is not already in the palette.                       */
+
+.about::before {
+  content: "";
+  position: absolute;
+  inset: -10%;             /* over-sized, so the blur has no visible edge */
+  pointer-events: none;
+  opacity: 0.9;
+  filter: blur(14px);
+  background:
+    /* equipment glows */
+    radial-gradient(circle 26rem at 12% 22%,
+      color-mix(in srgb, var(--accent) 34%, transparent) 0%, transparent 62%),
+    radial-gradient(circle 20rem at 88% 72%,
+      color-mix(in srgb, var(--accent) 26%, transparent) 0%, transparent 60%),
+    radial-gradient(circle 16rem at 68% 12%,
+      color-mix(in srgb, var(--warn) 16%, transparent) 0%, transparent 60%),
+    /* the structural grid of the room */
+    repeating-linear-gradient(90deg,
+      color-mix(in srgb, var(--muted) 30%, transparent) 0 2px,
+      transparent 2px 5.5rem),
+    repeating-linear-gradient(0deg,
+      color-mix(in srgb, var(--muted) 22%, transparent) 0 2px,
+      transparent 2px 5.5rem);
+}
+
+/* A vignette on top of it, so the centre of the panel stays the darkest
+   part of the screen and the text keeps its contrast. */
+.about::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: radial-gradient(ellipse 74% 62% at 50% 50%,
+              color-mix(in srgb, var(--base) 84%, transparent) 0%,
+              color-mix(in srgb, var(--base) 52%, transparent) 62%,
+              color-mix(in srgb, var(--base) 12%, transparent) 100%);
+}
+
+/* ---- the slides ---------------------------------------------------- *
+   All six are stacked in one grid area and swapped by opacity, so moving
+   between them costs no layout and each keeps its own scroll position.  */
+
+#about-track {
+  position: relative;
+  z-index: 1;               /* above the blurred laboratory behind it */
+  flex: 1;
+  display: grid;
+  min-height: 0;
+  padding: clamp(1.5rem, 5vh, 3rem) clamp(1.2rem, 5vw, 3rem) 0;
+}
+
+.about-slide {
+  grid-area: 1 / 1;
+  width: min(62rem, 100%);
+  margin: 0 auto;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  opacity: 0;
+  pointer-events: none;
+  /* Arrives from the right and settles: a slide being dealt, not a
+     cross-fade in place. Only transform and opacity animate, so this is
+     compositor work and never causes layout. */
+  transform: translateX(1.6rem);
+  transition: opacity 340ms ease, transform 340ms cubic-bezier(.2,.7,.3,1);
+}
+
+.about-slide.is-current {
+  opacity: 1;
+  pointer-events: auto;
+  transform: none;
+}
+
+.about-head { margin-bottom: clamp(1rem, 3vh, 1.8rem); }
+
+.about-sector {
+  margin: 0 0 0.5rem;
+  font-size: 0.64rem;
+  letter-spacing: 0.34em;
+  text-transform: uppercase;
+  color: var(--hairline);
+}
+
+.about-title {
+  margin: 0;
+  font-size: clamp(1.3rem, 3.6vw, 2.3rem);
+  font-weight: 200;
+  letter-spacing: 0.12em;
+  text-transform: uppercase;
+  color: var(--title);
+}
+
+.about-number {
+  margin: 0.5rem 0 0;
+  font-family: var(--mono);
+  font-size: 0.64rem;
+  letter-spacing: 0.16em;
+  color: var(--hairline-soft);
+}
+
+.about-body {
+  display: flex;
+  flex-direction: column;
+  gap: clamp(0.9rem, 2.4vh, 1.5rem);
+  padding-bottom: 2rem;
+}
+
+.about-body p {
+  margin: 0;
+  font-size: clamp(0.76rem, 1.1vw, 0.9rem);
+  line-height: 1.7;
+  color: var(--muted);
+}
+
+/* ---- the looping preview ------------------------------------------- *
+   A holographic plate: a lit hairline edge, a faint inner glow, and the
+   canvas the demonstration is drawn on.  See `about-preview.js` — nothing
+   in it touches the environment.                                       */
+
+.about-figure {
+  margin: 0;
+  position: relative;
+  border: 1px solid color-mix(in srgb, var(--accent) 30%, var(--hairline));
+  border-radius: 3px;
+  padding: 0.75rem 0.75rem 0.85rem;
+  background:
+    linear-gradient(180deg,
+      color-mix(in srgb, var(--accent) 6%, transparent) 0%,
+      transparent 45%),
+    color-mix(in srgb, var(--base) 82%, transparent);
+  box-shadow:
+    0 0 0 1px color-mix(in srgb, var(--accent) 7%, transparent),
+    0 0 34px color-mix(in srgb, var(--accent) 12%, transparent),
+    inset 0 0 26px color-mix(in srgb, var(--accent) 5%, transparent);
+  backdrop-filter: blur(3px);
+}
+
+/* The scan line across the top edge, which is what makes it read as a
+   projection rather than a picture frame. */
+.about-figure::before {
+  content: "";
+  position: absolute;
+  left: 12%;
+  right: 12%;
+  top: -1px;
+  height: 1px;
+  background: linear-gradient(90deg, transparent,
+              var(--accent) 50%, transparent);
+  opacity: 0.75;
+}
+
+.about-canvas {
+  display: block;
+  width: 100%;
+  height: clamp(8rem, 22vh, 11rem);
+  border-radius: 2px;
+}
+
+/* The stage of the loop, in the machine face — it changes as the preview
+   reaches each beat, so the words and the picture always agree. */
+.about-beat {
+  margin: 0.55rem 0 0;
+  font-family: var(--mono);
+  font-size: 0.62rem;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--accent);
+  text-align: center;
+  min-height: 1em;
+}
+
+/* "Watch for": the one line about the live room, under its illustration. */
+.about-watch {
+  margin: 0.7rem 0 0 !important;
+  padding-top: 0.7rem;
+  border-top: 1px solid var(--hairline-faint);
+  font-size: 0.72rem !important;
+  line-height: 1.6 !important;
+  color: var(--hairline-soft) !important;
+}
+
+.about-watch-label {
+  display: block;
+  font-size: 0.56rem;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  color: var(--hairline);
+  margin-bottom: 0.3rem;
+}
+
+/* ---- the five headings --------------------------------------------- *
+   Beside the preview on a wide screen, under it on a narrow one.       */
+
+.about-columns {
+  display: grid;
+  gap: clamp(0.9rem, 2.2vh, 1.3rem);
+}
+
+@media (min-width: 60rem) {
+  .about-body--room {
+    display: grid;
+    grid-template-columns: minmax(0, 20rem) minmax(0, 1fr);
+    align-items: start;
+    gap: clamp(1.2rem, 3vw, 2rem);
+  }
+  /* The preview stays put while the reader works down the headings. */
+  .about-figure { position: sticky; top: 0; }
+}
+
+/* ---- the method, given its own plate ------------------------------- *
+   It is what the sector exists to demonstrate, so it is not buried in a
+   paragraph.                                                          */
+
+.about-method {
+  border: 1px solid color-mix(in srgb, var(--accent) 32%, var(--hairline));
+  border-radius: 2px;
+  background: var(--accent-wash);
+  padding: 0.9rem 1.1rem;
+  box-shadow: inset 0 0 22px color-mix(in srgb, var(--accent) 8%, transparent);
+}
+
+.about-method-label {
+  margin: 0 0 0.35rem;
+  font-size: 0.58rem;
+  letter-spacing: 0.24em;
+  text-transform: uppercase;
+  color: var(--hairline);
+}
+
+.about-method-name {
+  margin: 0;
+  font-size: clamp(1rem, 2.2vw, 1.35rem) !important;
+  font-weight: 300;
+  letter-spacing: 0.08em;
+  color: var(--accent) !important;
+}
+
+.about-method-family {
+  margin: 0.3rem 0 0;
+  font-family: var(--mono);
+  font-size: 0.64rem !important;
+  letter-spacing: 0.1em;
+  color: var(--hairline-soft) !important;
+}
+
+/* ---- a labelled block, as in every sidebar ------------------------- */
+
+.about-block {
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  border-left: 1px solid color-mix(in srgb, var(--accent) 24%, var(--hairline));
+  padding: 0.15rem 0 0.15rem 0.85rem;
+}
+
+.about-heading {
+  font-size: 0.6rem !important;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: var(--hairline) !important;
+}
+
+.about-block ul {
+  margin: 0;
+  padding-left: 1.1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+}
+
+.about-block li {
+  font-size: clamp(0.74rem, 1.05vw, 0.86rem);
+  line-height: 1.65;
+  color: var(--muted);
+}
+
+/* ---- the transport ------------------------------------------------- */
+
+.about-foot {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  align-items: center;
+  gap: clamp(0.6rem, 2vw, 1.2rem);
+  padding: clamp(0.8rem, 2vh, 1.2rem) clamp(1.2rem, 5vw, 3rem);
+  border-top: 1px solid var(--hairline-faint);
+}
+
+#about-dots {
+  display: flex;
+  gap: 0.4rem;
+  margin: 0 auto;
+}
+
+/* One pip per slide: a hairline that lights up for the one being read. */
+.about-pip {
+  width: 1.6rem;
+  height: 2px;
+  padding: 0;
+  border: 0;
+  border-radius: 1px;
+  background: var(--hairline-faint);
+  cursor: pointer;
+  transition: background-color 200ms ease;
+}
+
+.about-pip:hover { background: color-mix(in srgb, var(--accent) 60%, transparent); }
+.about-pip[aria-current="true"] { background: var(--accent); }
+.about-pip:focus-visible { outline: 1px solid var(--accent); outline-offset: 3px; }
+
+.about-foot .btn {
+  font-size: 0.64rem;
+  padding: 0.8em 1.6em;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .about, .about-slide { transition: none; }
+  .about-slide { transform: none; }
+}

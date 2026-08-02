@@ -96,6 +96,33 @@ window.Sim = (function () {
       if (!sessionId) return Promise.reject(new Error('no session'));
       return request('POST', '/api/session/' + sessionId + '/episodes', {});
     },
+    /**
+     * Measure the frozen policy on every layout pool, plus a random baseline.
+     *
+     * Like `episodes`, this answers with a report rather than a snapshot, so
+     * it must not go through `command` — that would leave `Sim.snapshot`
+     * holding an evaluation table and every reader of it looking at the wrong
+     * kind of object. Nothing on the far end updates a weight; see
+     * `Session.evaluate`.
+     */
+    evaluate(layouts) {
+      if (!sessionId) return Promise.reject(new Error('no session'));
+      return request('POST', '/api/session/' + sessionId + '/evaluate',
+                     layouts === undefined ? {} : { layouts: layouts });
+    },
+
+    /**
+     * Generate an unseen warehouse and fly the learned policy in it.
+     *
+     * Answers with a whole recorded Episode, shaped exactly like a training
+     * one, so it replays through the same path with the same controls.
+     */
+    testRoom(seed) {
+      if (!sessionId) return Promise.reject(new Error('no session'));
+      return request('POST', '/api/session/' + sessionId + '/test-room',
+                     seed === undefined || seed === null ? {} : { seed: seed });
+    },
+
     setParameters(values) { return command('parameters', { values: values }); },
     resetParameter(name) { return command('parameter-default', { name: name }); },
     setAlgorithm(key) { return command('algorithm', { key: key }); },

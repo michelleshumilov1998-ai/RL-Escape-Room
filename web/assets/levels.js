@@ -237,6 +237,42 @@ function resetProgress() {
   refresh();
 }
 
+/**
+ * How far through the game the player is, in words.
+ *
+ * Progress survives closing the browser, which is right — and used to be
+ * completely invisible, so a restored run looked like a bug. Cleared count and
+ * a way to start over, both stated.
+ */
+function paintProgress() {
+  if (!dom.progressNote) return;
+  const cleared = Math.max(0, Math.min(LAST, state.highestUnlocked - 1));
+  dom.progressNote.textContent = cleared === 0
+    ? 'New run · no sectors cleared yet'
+    : cleared + ' of ' + LAST + ' sectors cleared';
+  // Nothing to reset on a clean run, so the control is not offered.
+  if (dom.newGame) dom.newGame.hidden = cleared === 0;
+}
+
+/**
+ * Start over from chamber 1.
+ *
+ * Confirmed, because it throws away real progress — and offered at all because
+ * without it a player whose stored progress is wrong (or who simply wants
+ * another run) has no way back to the beginning. `resetProgress` clears the one
+ * stored integer and nothing else.
+ */
+function startNewGame() {
+  const cleared = Math.max(0, state.highestUnlocked - 1);
+  if (cleared > 0 && !window.confirm(
+      'Start a new run? This clears ' + cleared
+      + ' cleared sector' + (cleared === 1 ? '' : 's') + '.')) {
+    return;
+  }
+  resetProgress();
+  select(1, { instant: true, force: true });
+}
+
 /** Everything the screen knows about one chamber, derived — never stored. */
 function derive(level, highestUnlocked) {
   if (CONFIG.debugUnlockAll) {
@@ -266,6 +302,8 @@ const dom = {
   enter: document.getElementById('enter'),
   back: document.getElementById('back'),
   note: document.getElementById('note'),
+  progressNote: document.getElementById('progress-note'),
+  newGame: document.getElementById('new-game'),
   canvas: document.getElementById('scene'),
 };
 
@@ -358,6 +396,8 @@ function render() {
   }
   dom.note.textContent = note;
   dom.note.classList.toggle('is-shown', note !== '');
+
+  paintProgress();
 
   dom.prev.disabled = level.index <= 1;
   dom.next.disabled = level.index >= LAST;
@@ -778,6 +818,8 @@ function drawStillScene() {
 dom.prev.addEventListener('click', () => step(-1));
 dom.next.addEventListener('click', () => step(1));
 
+if (dom.newGame) dom.newGame.addEventListener('click', startNewGame);
+
 dom.back.addEventListener('click', () => {
   // Progress is already in storage, written the moment a chamber was
   // cleared, so there is nothing to save on the way out.
@@ -873,12 +915,21 @@ function boot() {
     // nothing opens, so there is nothing to animate.
     select(completed, { instant: true, force: true });
   } else {
-    // Coming back out of a chamber returns to that chamber. Failing that,
-    // open on the furthest one available rather than on the first.
+    /* Coming back out of a chamber returns to that chamber. Arriving from the
+       main menu opens on the FIRST chamber.
+
+       WHY NOT THE FURTHEST ONE, WHICH IS WHAT IT USED TO DO
+       `Math.min(LAST, highestUnlocked)` meant a player who had finished the
+       game — or whose stored progress said so — pressed PLAY and landed on
+       chamber 5 with no explanation. That is indistinguishable from the game
+       starting in the wrong room, and it is what was reported.
+
+       Progress is not thrown away: chambers stay unlocked, the readout above
+       says how many are cleared, and the player can walk right to any of them.
+       What changes is that the game always *starts* at the beginning, so
+       arriving at chamber 5 is a decision rather than a surprise. */
     const returned = takeReturnSignal();
-    const opening = returned === null
-      ? Math.min(LAST, state.highestUnlocked)
-      : returned;
+    const opening = returned === null ? 1 : returned;
     select(opening, { instant: true, force: true });
   }
 

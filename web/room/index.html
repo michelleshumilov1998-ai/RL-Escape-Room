@@ -8,6 +8,10 @@
 <link rel="stylesheet" href="../assets/base.css">
 <link rel="stylesheet" href="../assets/level.css">
 <link rel="stylesheet" href="../assets/room/room.css">
+<!-- The ending overlay, for the last chamber. Modelled on start.css,
+     because the two screens are the bookends of one story. -->
+<link rel="stylesheet" href="../assets/cleared.css">
+<link rel="stylesheet" href="../assets/ending.css">
 </head>
 <body>
 
@@ -19,6 +23,12 @@
   <span id="strip-episodes"></span>
   <span id="strip-state">Idle</span>
   <span id="strip-metric"></span>
+  <!-- The current mission objective, for a room whose goal changes part-way
+       through. Hidden in the four rooms that have one goal throughout. -->
+  <span id="strip-objective" class="strip-objective" hidden></span>
+  <!-- Environment settings in force, for a room whose difficulty is a slider.
+       Room 2 shows its bridge collapse probability here. -->
+  <span id="strip-environment" class="strip-environment" hidden></span>
   <!-- Shown the moment one episode actually gets out, because that is
        what unlocks the next chamber and it was otherwise invisible. -->
   <span id="strip-cleared" class="strip-cleared" hidden></span>
@@ -27,6 +37,64 @@
 
 <!-- Generated from the room's entity types, never hand-written. -->
 <ul class="legend" id="legend"></ul>
+
+<!--
+  The ending. Only the last chamber has one, and it is only ever shown once
+  R-5 has actually reached the unlocked blast door.
+
+  It lives on this screen rather than as a page of its own so that the run is
+  still alive behind it: "replay final escape" plays the recorded episode that
+  escaped, "view training results" opens the graphs of the run that produced
+  it, and "play again" resets it. A separate page would have had to leave the
+  session behind and could only have shown numbers copied out of it.
+-->
+<section class="ending" id="ending" hidden aria-hidden="true"
+         role="dialog" aria-modal="true" aria-labelledby="ending-title">
+  <!-- Atmosphere only, behind everything, and never takes a click. -->
+  <canvas id="ending-scene" aria-hidden="true"></canvas>
+
+  <div class="ending-stage">
+    <p class="ending-eyebrow">Project R-5</p>
+    <h1 class="ending-title" id="ending-title">Mission Complete</h1>
+    <p class="ending-lead">R-5 successfully escaped the AI laboratory.</p>
+
+    <ul class="ending-log">
+      <li>Laboratory security disabled.</li>
+      <li>Primary blast door opened.</li>
+      <li>Experiment terminated.</li>
+    </ul>
+
+    <!-- Built from the run's own statistics; see `Ending.summary`. -->
+    <dl class="ending-stats" id="ending-stats"></dl>
+
+    <div class="ending-actions">
+      <button type="button" class="btn ending-btn" id="ending-replay">
+        Replay Final Escape
+      </button>
+      <button type="button" class="btn ending-btn" id="ending-results">
+        View Training Results
+      </button>
+      <button type="button" class="btn ending-btn" id="ending-again">
+        Play Again
+      </button>
+      <button type="button" class="btn ending-btn" id="ending-menu">
+        Main Menu
+      </button>
+    </div>
+  </div>
+</section>
+
+<!-- The sector-cleared flash. Over the top, never takes a click, clears
+     itself after five seconds. See `assets/cleared.js`. -->
+<section class="cleared" id="cleared" hidden aria-live="polite">
+  <div class="cleared-stage">
+    <div class="cleared-rule" aria-hidden="true"></div>
+    <p class="cleared-title">Mission Complete</p>
+    <p class="cleared-sector">Sector cleared</p>
+    <p class="cleared-next">Preparing next sector…</p>
+    <div class="cleared-rule" aria-hidden="true"></div>
+  </div>
+</section>
 
 <button type="button" class="nav corner" id="exit"
         aria-label="Stop and leave the chamber">
@@ -71,8 +139,13 @@
   </details>
 
   <!-- Built entirely from the room's parameterSchema. Adding a parameter
-       later is a change to that array and to nothing here. -->
-  <details class="section">
+       later is a change to that array and to nothing here.
+
+       OPEN BY DEFAULT. Room 2's bridge collapse probability is the control the
+       chamber exists to demonstrate, and it was one click down inside a
+       collapsed panel — which is indistinguishable from not being there. The
+       parameters are the point of this application, so they are not hidden. -->
+  <details class="section" open>
     <summary>Parameters</summary>
     <div class="section-body" id="parameters"></div>
   </details>
@@ -93,6 +166,33 @@
   <details class="section">
     <summary>Charts</summary>
     <div class="section-body" id="charts"></div>
+  </details>
+
+  <!-- Only for a chamber that has held-out layouts, which is room 5 alone.
+       Hidden by the shell everywhere else, so the sidebar's shape is
+       unchanged in rooms 1 to 4. -->
+  <details class="section" id="generalisation-section" hidden>
+    <summary>Generalisation</summary>
+    <div class="section-body">
+      <p class="hint" id="generalisation-hint"></p>
+      <div class="row">
+        <button type="button" class="btn wide" id="evaluate">
+          Evaluate all layouts
+        </button>
+      </div>
+      <div class="row">
+        <button type="button" class="btn wide" id="test-room">
+          Test on new random room
+        </button>
+      </div>
+      <div class="row">
+        <button type="button" class="btn wide" id="another-test-room">
+          Another unseen room
+        </button>
+      </div>
+      <p class="hint" id="test-room-hint"></p>
+      <div id="evaluation-table"></div>
+    </div>
   </details>
 
   <!-- Every method this chamber offers, on one set of axes. Its own run on
@@ -159,6 +259,13 @@
 <script src="../assets/sim.js"></script>
 <script src="../assets/room/producer.js"></script>
 <script src="../assets/room/compare.js"></script>
+<!-- Before the shell, which mounts it during boot. Draws the door and
+     the drone with the same `Shapes` recipes the room does. -->
+<!-- The one sound in the game, synthesised at runtime: a bridge failing.
+     Loaded before the shell, which triggers it. -->
+<script src="../assets/impact.js"></script>
+<script src="../assets/cleared.js"></script>
+<script src="../assets/room/ending.js"></script>
 <script src="../assets/room/shell.js"></script>
 </body>
 </html>
