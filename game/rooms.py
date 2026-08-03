@@ -792,9 +792,16 @@ ROOM4 = {
             "shortens the route, at 5 to enter — and it is much harder to "
             "arrive slowly out of it.",
         ],
-        "actions": "Hold, or thrust up, down, left or right. A thrust steps the matching velocity component by one unit within {-1, 0, +1}; it is not a move from one square to the next. Two presses are needed to reverse a direction, which is what momentum means here."
-                   "acceleration, not a move: nothing here steps from one "
-                   "square to the next.",
+        # One sentence per line, and the fragment that used to be concatenated
+        # on the end of it is gone. Two adjacent string literals join silently
+        # in Python, so the leftover tail of an older wording sat in the
+        # sidebar mid-sentence: "...what momentum means here.acceleration, not
+        # a move: nothing here steps from one square to the next."
+        "actions": "Hold, or thrust up, down, left or right. A thrust steps "
+                   "the matching velocity component by one unit within "
+                   "{-1, 0, +1}: it is an acceleration, not a move from one "
+                   "square to the next. Two presses are needed to reverse a "
+                   "direction, which is what momentum means here.",
         "rewards": [
             ["Each step", "-0.01"],
             ["Closing on the pad", "+5 per metre closed"],

@@ -42,6 +42,33 @@ player can move: sliders change the learning problem, graphs redraw from the
 run that actually happened, and any recorded episode can be replayed frame by
 frame.
 
+### How this README answers the brief
+
+The brief asks for the project's code on GitHub, and for a README that sets out,
+for each room, the structure of its **states** and its **rewards**, and the
+**parameters that fit the problem**. Every room section below carries the same
+four headings, in that order:
+
+* **State** — what the agent's state is, and why each component has to be in it
+  for the room to be Markov
+* **Actions** — what it can do
+* **Rewards** — every reward the room pays, with its value
+* **The settings that solve it** — the defaults, why they are those values, and
+  what they achieve *measured*, next to the nearby settings that fail
+
+Every number in those four sections is read from `game/rooms.py` and
+`game/config.py`, or produced by training the room headlessly at the stated
+settings. The measurements are not assertions to be taken on trust —
+`experiments/measure_parameters.py` prints every one of those tables, one room at
+a time:
+
+```bash
+python3 experiments/measure_parameters.py --room 3
+```
+
+The parameter defaults for all five rooms are also collected in one table under
+[Hyperparameters](#hyperparameters).
+
 ### Technologies used
 
 | Layer | Technology |
@@ -185,6 +212,58 @@ measured against. **Policy Iteration** is offered alongside for comparison.
 | Ice slipperiness | 0.0 – 0.5 | 0.20 |
 | Battery bonus | 0 – 80 | 10 |
 
+### The settings that solve it
+
+γ 0.95, θ 1e−4, ice 0.20, battery +10. Measured by planning to convergence and
+then walking the finished plan 200 times from the start:
+
+| Ice slip | Sweeps to converge | V(start) | Steps walked | Reached the panel |
+|---|---|---|---|---|
+| 0.00 | 12 | 51.25 | 11.0 | 100% |
+| 0.10 | 32 | 46.61 | 12.2 | 100% |
+| **0.20** | **39** | **40.75** | **13.3** | **100%** |
+| 0.30 | 26 | 33.41 | 16.6 | 100% |
+| 0.40 | 30 | 30.89 | 17.2 | 100% |
+| 0.50 | 35 | 27.50 | 18.6 | 100% |
+
+The plan reaches the panel at every setting of the ice, and it goes by the
+teleport pads at every setting: what the slip takes is strides, not the route.
+0.20 is the default because it is loose enough that a slip is a visible event on
+the way — two extra steps on average — and far short of the range where the room
+becomes a lottery.
+
+**γ** has one job here, and that is to leave a +100 thirteen steps away still
+worth something at the start:
+
+| γ | V(start) | Steps walked |
+|---|---|---|
+| 0.50 | −2.00 | 26.4 |
+| 0.80 | 1.96 | 13.3 |
+| 0.90 | 19.03 | 13.3 |
+| **0.95** | **40.75** | **13.3** |
+| 0.99 | 71.31 | 13.3 |
+| 0.999 | 82.30 | 16.0 |
+
+At 0.50 the panel is discounted away to nothing, V(start) goes negative, and the
+plan wanders — twice the steps for the same walk. From 0.80 upwards the route is
+the same thirteen-step one, so 0.95 is a comfortable value rather than a tuned
+one: well inside the range where the goal still reaches the start, and far
+enough below 1 that a sweep converges quickly.
+
+**θ** is a stopping rule and not a quality setting, which the numbers make plain:
+
+| θ | Sweeps | V(start) | Route |
+|---|---|---|---|
+| 1e−1 | 25 | 40.70 | unchanged |
+| 1e−2 | 30 | 40.74 | unchanged |
+| **1e−4** | **39** | **40.75** | unchanged |
+| 1e−6 | 51 | 40.75 | unchanged |
+
+The plan is finished well before the numbers stop moving. 1e−4 is where V(start)
+has settled to the second decimal; 1e−6 buys twelve more sweeps and changes
+neither the route nor the value. Dragging the dashed line on the graph shows
+exactly this.
+
 ### Graphs shown
 
 One graph, because a planner produces one measurable quantity per sweep:
@@ -297,11 +376,17 @@ and a faster escape still scores higher.
 
 ### Measured behaviour
 
-Learned route, five random seeds per setting:
+Which way the learned policy goes, seeds 0–4, one greedy run each after 1500
+episodes. The figure is how many of the five seeds took the span:
 
 | p | 0.00 | 0.05 | 0.10 | 0.20 | 0.30 | 0.40 | 0.60 |
 |---|---|---|---|---|---|---|---|
-| route | span | span | span | span | **mixed 2/5** | round | round |
+| took the span | 5/5 | 5/5 | 5/5 | 5/5 | **4/5** | **1/5** | 0/5 |
+
+The decision turns over between 0.20 and 0.60, which is the band the reward
+magnitudes above were chosen to put it in. The two mixed settings are the
+interesting ones: at 0.30 and 0.40 the two routes are close enough in value that
+which one a run settles on depends on what it happened to see.
 
 ### Hyperparameters
 
@@ -316,6 +401,42 @@ Learned route, five random seeds per setting:
 | Bridge collapse probability | 0.0 – 1.0 | 0.10 |
 | Initial Q value | 0 – 150 | 30 |
 | Episodes to train | 100 – 8000 | 1500 |
+
+### The settings that solve it
+
+Measured over seeds 0–4, following the learned policy with exploration removed,
+100 runs per seed:
+
+| Setting | Takes the span | Reaches the exit | Steps |
+|---|---|---|---|
+| **the defaults** | **100%** | **91%** | **8.9** |
+| Q init 0 instead of 30 | 100% | 91% | 8.5 |
+| 300 episodes instead of 1500 | 40% | 35% | 123.5 |
+| ε decay 0.95 instead of 0.995 | 80% | 73% | 46.8 |
+| collapse 0.30 | 80% | 77% | 10.3 |
+| collapse 0.60 | 0% | 100% | 22.2 |
+
+At the defaults the policy commits to the span and loses 9% of its crossings to
+the collapse — which is the 10% on the slider, and the reason "reaches the exit"
+is not 100% for a policy that has solved the room correctly. A crossing takes 8.9
+steps against the span's ideal 9, so what it has learned is the short route and
+not a wander that happens to end well.
+
+The two settings that break it are both about how long exploration lasts, and the
+step column is where they show. At 300 episodes the agent has not crossed often
+enough to have priced the span: it reaches the exit 35% of the time and averages
+123.5 steps against a 200-step cap, which is a policy still wandering rather than
+one that has chosen. Decaying ε at 0.95 instead of 0.995 puts it on a route before
+it has properly seen the alternative — a fifth of its crossings and a sixth of its
+exits given up, and five times the steps. **1500 episodes and a 0.995 decay are
+therefore the parameters that solve this room**; α and γ are the ordinary values
+and the room is not sensitive to them.
+
+The optimistic Q of 30 makes no measurable difference by 1500 episodes. It is
+there so that the early episodes sweep the sector instead of settling into the
+first route that works, and not because the run ends up anywhere else without
+it — which is worth stating plainly rather than claiming an effect the
+measurement does not show.
 
 ### Why SARSA is appropriate
 
@@ -401,6 +522,41 @@ arriving early to hold position is a genuine tactic.
 | Exploration decay | 0.9 – 1.0 | 0.995 |
 | Initial Q value | 0 – 150 | 0 |
 | Episodes to train | 100 – 8000 | **4000** |
+
+### The settings that solve it
+
+The measurement here has to be taken on the **greedy** policy. ε sits at a floor
+of 0.05 and a single stray step meets the patrol, so the training curve reports a
+much lower success rate than the learned policy actually achieves — the last
+column below is not this room's score, the first one is.
+
+Seeds 0–4, one greedy run each after training:
+
+| Setting | Got out | Steps | Return | Success in the last 200 training episodes |
+|---|---|---|---|---|
+| **the defaults** | **5/5** | **71.6** | **+133.4** | 27% |
+| 2000 episodes | 5/5 | 81.2 | +121.0 | 16% |
+| 1000 episodes | **0/5** | 76.8 | −81.8 | 0% |
+| γ 0.95 | 5/5 | 57.0 | +148.0 | 32% |
+| γ 0.90 | 5/5 | 61.8 | +140.0 | 31% |
+| γ 0.80 | 5/5 | 57.2 | +147.4 | 38% |
+| ε decay 0.95 | 5/5 | 61.8 | +142.4 | 32% |
+| ε floor 0 instead of 0.05 | 5/5 | 81.0 | +123.6 | 100% |
+
+**The episode count is the parameter that decides whether this room is solved at
+all.** At 1000 episodes it fails on every seed; at 2000 it succeeds on every seed
+but takes a route ten steps longer than the default does. Six errands in a fixed
+order is a long way to carry credit back, and that distance is paid for in
+episodes.
+
+γ 0.99 is the value the room's design argues for — the exit is some seventy steps
+from the start with nothing paid out over most of them, and a discount close to
+one is what leaves the door's value visible at the first move. It is also the
+parameter the outcome is *least* sensitive to: every setting from 0.80 to 0.99
+gets out on all five seeds, and 0.95 finds a shorter route than 0.99 does. That
+is stated here rather than tidied away, because "γ near 1 is required to escape"
+is a claim this measurement does not support; what γ near 1 buys is a value
+function that is informative at the start, not the escape itself.
 
 ### Replay and graphs
 
@@ -511,11 +667,11 @@ the slider three real regimes:
 | 1.0 – 1.41 | an arrival along one axis; a diagonal one crashes |
 | above 1.41 | any arrival |
 
-The default is **1.0**. Measured over 1200 episodes: at 1.0 the agent lands 100%
-of the time and at 1.5 it lands 98%. Below 1.0 — where nothing but a full stop
-counts — it learns to hover instead of risking the crash penalty and does not
-land at all, so that regime is available as an experiment rather than as a
-working setting.
+The default is **1.0**. Measured over the last 200 episodes of a 1200-episode
+run: at 1.0 the agent lands 99.5% of the time and at 1.5 it lands 98.5%. Below
+1.0 — where nothing but a full stop counts — it works out that hovering scores
+about +23 while a crash costs −30, so it hovers and does not land at all. That
+regime is available as an experiment rather than as a working setting.
 
 The approach warning on screen uses the same rule, so the display cannot stay
 calm up to a wreck.
@@ -546,6 +702,42 @@ calm up to a wreck.
 | Landing speed limit | 0.05 – 1.5 | **1.00** |
 | Episodes to train | 100 – 8000 | **1200** |
 
+### The settings that solve it
+
+Measured over the last 200 episodes of a 1200-episode run:
+
+| Setting | Landed | Return |
+|---|---|---|
+| **the defaults** | **99.5%** | **+238.8** |
+| γ 0.90 instead of 0.995 | 55.0% | +131.5 |
+| α 0.90 instead of 0.30 | **0.5%** | −3.0 |
+| landing limit 1.5 | 98.5% | +235.3 |
+| landing limit 0.5 | **0.0%** | +23.2 |
+
+Both learning parameters are load-bearing here, and they fail in opposite
+directions.
+
+**γ 0.995** is needed because the pad is several hundred 0.02 s steps from the
+launch. At 0.90 the landing bonus has decayed to nothing long before the value
+reaches the start, and what the drone learns is to fly well and arrive
+carelessly — it still reaches the pad, and lands cleanly only 55% of the time.
+
+**α 0.30** is the upper end of what this representation tolerates. The update in
+`algorithms/linear.py` is `alpha / len(active) * error`, so α is the share of the
+TD error the whole active tile set absorbs in one step: at 0.90 nearly the entire
+error is applied at once, each estimate is replaced by the latest noisy target
+instead of averaging over samples, and with a bootstrapped target that feeds back
+into itself. Measured, the run lands 0.5% of the time — it never learns to land at
+all. This is the failure the weight-norm graph is on the screen for, and the
+reason α is a slider rather than a constant.
+
+The landing limit is the room's difficulty control rather than a learning
+parameter, and it has exactly three regimes because a discrete velocity admits
+exactly three speeds. At 1.5 any arrival counts and the task is nearly the same
+one — 98.5%. At 0.5 nothing but a full stop counts, and the agent works out that
+hovering out-scores risking the crash. **1.00 is the only setting at which the
+landing has to be flown and can be.**
+
 ### Replay and graphs
 
 Reward per episode, steps per episode, exploration rate and convergence
@@ -554,7 +746,7 @@ speed it was flown and the landing can be studied frame by frame.
 
 ---
 
-## Room 5 — Function Approximation Navigation
+## Room 5 — Semi-gradient Q-Learning
 
 ### Dynamic obstacle generation and random layouts
 
@@ -578,8 +770,8 @@ generated warehouse is always solvable.
 R-5 **cannot see the map**. It has a forward sensor cone of configurable depth
 (`sensor_range`, default **3.0 m**, half-angle ≈ 0.55 rad). Visibility is
 decided **centre-to-centre**: an obstacle is visible when the distance between
-centres is within the sensor range, with no radius subtracted. The observation
-handed to the learner is 14 numbers — local features only.
+centres is within the sensor range, with no radius subtracted. What the cone
+leaves the learner with is set out under **State** below.
 
 ### Continuous movement
 
@@ -604,11 +796,34 @@ and the 300-decision episode limit is
 The stage is part of the state, so the same position means different things
 before and after activation. Beams stay lit until the terminal is reached.
 
-### State
+### State — and the observation, which is not the same thing
 
-`(x, y, vx, vy, stage, phase)`. `phase` is a bounded integer from which every
-moving obstacle's position is a pure function, which is what keeps the state
-Markov without storing each drone separately.
+The **world's** state is `(x, y, vx, vy, stage, phase)`. `phase` is a bounded
+integer from which every moving obstacle's position is a pure function, which is
+what keeps the world Markov without storing each drone separately; `stage` is 0
+before the terminal has been reached and 1 after, so the same position means
+different things at different points in the mission.
+
+The **agent's** observation is 14 numbers: where it is, how fast it is going, the
+direction and distance to its current objective, three range-limited sensor rays,
+and how near the closest visible drone is and how fast it is closing. It never
+receives the layout, and two different warehouses can produce identical
+observations — so the observation is **not** Markov even though the world is.
+That gap is the room: it is what makes this partial observability, and it is why
+a linear model over *local* features is the thing that can transfer between
+layouts at all.
+
+### Actions
+
+Five, the same drone frame as Room 4:
+
+```
+hold (0,0) · up (0,−1) · down (0,+1) · left (−1,0) · right (+1,0)
+```
+
+Thrust is an acceleration and not a move, and one decision is held for ten
+physics ticks — so an action commits the agent for 0.2 s, which is long enough
+for a patrolling drone to have moved.
 
 ### Rewards
 
@@ -664,9 +879,74 @@ single unseen layout on demand.
 | Random seed | 0 – 999 | 0 |
 | Episodes to train | 100 – 8000 | **4000** |
 
+### The settings that solve it
+
+Every figure below is the **frozen** policy's escape rate — an evaluation updates
+no weights — averaged over seeds 0, 1 and 2, with a random-action baseline in the
+last column. The column that counts is **unseen test**: those twenty layouts are
+never trained on, and the pools are checked to be disjoint at construction.
+
+| Setting | Train (120) | Validation (10) | **Unseen (20)** | Random |
+|---|---|---|---|---|
+| **the defaults** | 51.1% | 40.0% | **38.3%** | 0.0% |
+| γ 0.99 instead of 0.97 | 57.2% | 53.3% | 40.0% | 0.0% |
+| α 0.60 instead of 0.20 | 41.4% | 33.3% | 41.7% | 0.0% |
+| sensor range 10 m instead of 3 | 36.1% | 43.3% | 26.7% | 0.0% |
+| 1000 episodes instead of 4000 | 2.2% | 3.3% | **1.7%** | 0.0% |
+| 20 training layouts instead of 120 | **61.7%** | 13.3% | **16.7%** | 0.0% |
+
+**The training-pool size is the parameter this room turns on, and the last row is
+the whole argument for the default.** Cut the pool to 20 layouts and the score on
+the layouts it trained on goes *up* — 61.7%, the best train figure in the table —
+while the unseen score collapses to 16.7%. That is a generalisation gap of +45
+points against the +12.8 the defaults give, and it is what memorising looks like
+when it is measured properly. A README that reported only the train column would
+have called the worse policy the better one.
+
+**The episode count is binding** in the same way as in Room 3: at 1000 episodes
+the room is simply not solved, on any pool.
+
+**The sensor range is the room's central parameter, and more sight is worse.** At
+10 m R-5 can see the whole warehouse, and the unseen score falls by 11.6 points.
+The reason is that the observation is fixed at fourteen numbers however far the
+cone reaches — three rays and one nearest-drone pair — so a longer range does not
+add detail, it makes the same fourteen numbers describe a larger and vaguer
+region, and the rays start reporting clutter that has no bearing on the next
+0.2 s. 3.0 m is roughly what matters within one decision.
+
+**γ and α are the parameters the room is least sensitive to.** Over three seeds
+γ 0.99 scored 1.7 points higher on the unseen pool than the 0.97 default — one
+layout in twenty, on one seed — and it did not diverge at 4000 episodes on any of
+them. 0.97 is kept because it is the more conservative setting for a combination
+that has no convergence guarantee at all, not because the measurement condemns
+0.99; the weight-norm graph is there to be watched rather than trusted. α 0.60
+costs ten points of train and none of unseen, which says more about how much the
+score varies between warehouses than about the step size.
+
+Against all of this, the baseline: a random policy escapes **0%** of the unseen
+layouts and collides in every one of them. Whatever the learned policy is doing
+at 38%, it is not luck.
+
+### Why semi-gradient Q-Learning fits
+
+The state is continuous and the layout changes every episode, so there is no
+table to keep and nothing to memorise: the only thing that can be learned is a
+function of the local features, which is what a weight vector over tile-coded
+observations is. **Off-policy** is the right half of the choice because the
+exploratory step that flies into a shelf should not be priced into the value of
+the route that avoids it — with a new warehouse every episode, exploration is
+expensive and there is no second chance to walk the same corridor.
+
+That comes with the standard caveat, and this room is where the project
+demonstrates it rather than asserting it: semi-gradient Q-Learning combines
+bootstrapping, off-policy targets and function approximation, which is the
+combination that has no convergence guarantee. The weight-norm graph is on the
+screen for that reason. Semi-gradient SARSA is offered beside it as the on-policy
+contrast.
+
 ### Replay and graphs
 
-Ten graphs (listed below). Replay reproduces an episode exactly, **including
+Eleven graphs (listed below). Replay reproduces an episode exactly, **including
 the layout it was recorded in** — a replay animates the right trajectory
 through the right warehouse, not through whichever layout happens to be
 current.
@@ -875,6 +1155,9 @@ RL-Escape-Room/
 ├── requirements.txt          pytest only; the app itself needs nothing
 ├── pytest.ini
 │
+├── experiments/
+│   └── measure_parameters.py  reproduces every "settings that solve it" table
+│
 ├── game/                     all environments, algorithms and training
 │   ├── rooms.py              the five room definitions: layouts, rewards,
 │   │                         parameters, graphs and briefing text
@@ -937,6 +1220,14 @@ To run the test suite:
 ```bash
 pip install -r requirements.txt      # pytest, for the tests only
 python3 -m pytest                    # 305 tests
+```
+
+To reproduce the measured parameter tables — no dependencies at all, since it
+trains the rooms through the same code the server does:
+
+```bash
+python3 experiments/measure_parameters.py --room 1   # seconds
+python3 experiments/measure_parameters.py --room 5   # about half an hour
 ```
 
 ---
