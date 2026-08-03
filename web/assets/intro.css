@@ -23,6 +23,11 @@
 
 .stage { transition: opacity 700ms ease; }
 
+/* The vignette and the scene are dimmed and lifted while the cinematic runs
+   (see `.intro` below); they cross-fade back on the same curve as everything
+   else, so handing over to the menu is one movement rather than a step. */
+body::after, #scene { transition: opacity 700ms ease; }
+
 body.is-introducing .stage {
   opacity: 0;
   /* Not clickable while it is invisible, so a click during the cinematic
@@ -32,6 +37,7 @@ body.is-introducing .stage {
 
 @media (prefers-reduced-motion: reduce) {
   .stage { transition: none; }
+  body::after, #scene { transition: none; }
 }
 
 /* ---- leaving for the chamber select -------------------------------- *
@@ -53,13 +59,29 @@ body.is-leaving { opacity: 0; }
   cursor: pointer;
   opacity: 0;
   transition: opacity 700ms ease;
-  /* Darker than the start screen's own vignette: the type is small and
-     there is a robot running about behind it. */
-  background: radial-gradient(ellipse 80% 70% at 50% 50%,
-              color-mix(in srgb, var(--base) 82%, transparent) 0%,
-              color-mix(in srgb, var(--base) 62%, transparent) 55%,
-              color-mix(in srgb, var(--base) 30%, transparent) 100%);
+  /* A THIN WASH, NOT A CURTAIN, AND IT WAS NOT BEFORE.
+
+     This used to open on 82% base at the centre and never fall below 30% at
+     the edges — and it is the *third* darkening layer on the screen, over the
+     start screen's own vignette and over a canvas already at half opacity.
+     Multiplied out, that left the animation showing at about 4% of itself:
+     the robot the cinematic is captioning could not be seen at all.
+
+     So the full-screen layer only has to knock the backdrop back a little.
+     The contrast the small type needs is bought locally instead, by the pool
+     behind `#intro-cards` below, which covers the words and nothing else. */
+  background: radial-gradient(ellipse 84% 74% at 50% 50%,
+              color-mix(in srgb, var(--base) 34%, transparent) 0%,
+              color-mix(in srgb, var(--base) 22%, transparent) 55%,
+              color-mix(in srgb, var(--base) 6%, transparent) 100%);
 }
+
+/* The start screen's vignette and the canvas are both tuned for the menu,
+   where nothing else sits on top. While the cinematic is running there is a
+   whole extra layer above them, so the vignette gives way and the scene comes
+   up to meet it. Both revert the moment the class goes. */
+body.is-introducing::after { opacity: 0.4; }
+body.is-introducing #scene { opacity: 0.82; }
 
 .intro.is-open { opacity: 1; }
 .intro[hidden] { display: none; }
@@ -77,6 +99,29 @@ body.is-leaving { opacity: 0; }
   place-items: center;
   width: min(46rem, 88vw);
   min-height: 11rem;
+  /* Its own stacking context, so the pool below can sit at z-index -1 and land
+     behind the slides without falling behind `.intro`'s wash as well. */
+  isolation: isolate;
+}
+
+/* ---- the pool behind the words ------------------------------------- *
+   All the contrast the briefing needs, over the area the briefing occupies.
+   It fades out completely before the edge of the card stack, so the robot
+   running past on either side stays visible — which is the entire point of
+   having an animation behind the text.                                   */
+
+#intro-cards::before {
+  content: "";
+  position: absolute;
+  /* Wider than the type, so the falloff happens off the ends of the lines
+     rather than across them. */
+  inset: -18% -10%;
+  z-index: -1;
+  pointer-events: none;
+  background: radial-gradient(ellipse 60% 56% at 50% 50%,
+              color-mix(in srgb, var(--base) 76%, transparent) 0%,
+              color-mix(in srgb, var(--base) 44%, transparent) 58%,
+              color-mix(in srgb, var(--base) 0%, transparent) 100%);
 }
 
 .intro-card {
@@ -228,7 +273,11 @@ body.is-leaving { opacity: 0; }
   font-size: clamp(0.58rem, 1vw, 0.7rem);
   letter-spacing: 0.16em;
   text-transform: uppercase;
-  color: var(--hairline);
+  /* It sits outside the pool above, on the lit backdrop, and it is the line
+     that explains what the robot is doing — so it carries --muted and its own
+     shadow rather than a hairline that the animation can wash out. */
+  color: var(--muted);
+  text-shadow: 0 1px 12px var(--base), 0 0 4px var(--base);
   white-space: nowrap;
 }
 
