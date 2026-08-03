@@ -1498,8 +1498,9 @@ class WarehouseWorld:
         Q(start) reaching +1200 against a true value near 250. Holding each
         action for several ticks fixes the horizon without touching either the
         discount or the physics: the state still evolves every 0.02 s, and the
-        agent chooses every 0.1 s, which is a reasonable rate for a drone to
-        change its mind and makes 0.95 a horizon of a hundred physics steps.
+        agent chooses every 0.2 s -- ten ticks -- which is a reasonable rate
+        for a drone to change its mind and makes the discount a horizon of a
+        few hundred physics steps rather than a few dozen decisions.
         """
         total = 0.0
         # Mission events happen on a tick, and a decision is ten of them.

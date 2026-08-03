@@ -84,6 +84,29 @@ window.Charts = (function () {
     return out;
   }
 
+  /**
+   * Which index of the full series each bucket ended at.
+   *
+   * Bucketing throws away *where* a point was, and the x axis needs it back:
+   * without this the axis can only count buckets, and a run of 4000 episodes
+   * bucketed to 900 would be labelled 0..900. Same arithmetic as `bucket`, so
+   * the two cannot drift apart.
+   */
+  function bucketIndices(length, limit) {
+    if (length <= limit) {
+      const all = new Array(length);
+      for (let index = 0; index < length; index += 1) all[index] = index;
+      return all;
+    }
+    const size = length / limit;
+    const out = [];
+    for (let index = 0; index < limit; index += 1) {
+      const to = Math.min(length, Math.floor((index + 1) * size));
+      out.push(Math.max(0, to - 1));
+    }
+    return out;
+  }
+
   /** A trailing rolling average, same length as the input. */
   function rollingAverage(values, window_) {
     if (values.length === 0) return [];
@@ -156,10 +179,24 @@ window.Charts = (function () {
       return;
     }
 
+    /* THE ROLLING AVERAGE IS TAKEN BEFORE THE BUCKETING, NOT AFTER.
+       It used to be the other way round: the series was bucketed down to 900
+       points and *then* averaged over a window scaled to the bucket count. At
+       4000 episodes that is a mean of roughly four buckets of four episodes —
+       an average of averages, and not the 20-episode moving average the label
+       claimed. Now the window is exactly `smoothingWindow` real episodes,
+       computed on the full series, and only then reduced for drawing.
+
+           smooth[i] = mean(reward[max(0, i-19) .. i])                       */
+    const smoothedFull = rollingAverage(values, C.charts.smoothingWindow);
     const drawn = bucket(values, C.charts.maxPointsDrawn);
-    const smoothed = rollingAverage(
-      drawn, Math.max(2, Math.round(C.charts.smoothingWindow
-                                    * (drawn.length / values.length) || 1)));
+    const smoothed = bucket(smoothedFull, C.charts.maxPointsDrawn);
+    // Where each drawn point sits in the full series, so the x axis can be
+    // labelled with real episode numbers rather than bucket indices.
+    const at = bucketIndices(values.length, C.charts.maxPointsDrawn);
+    const labelFor = index => (settings.xValues
+      ? settings.xValues[at[index]]
+      : at[index] + 1);
     // The threshold has to be inside the band or the line marking it
     // would sit on the frame's edge and say nothing.
     const level = settings.threshold === undefined ? null
@@ -197,8 +234,12 @@ window.Charts = (function () {
       return;
     }
 
+    // A chart may ask for the moving average alone. The dashboard shows the
+    // raw return and the smoothed return as two separate charts, the way the
+    // course material does, and drawing the noise again underneath the second
+    // one would only make it harder to read.
     ctx.strokeStyle = colours.muted;
-    ctx.globalAlpha = C.charts.rawOpacity;
+    ctx.globalAlpha = settings.smoothOnly ? 0 : C.charts.rawOpacity;
     ctx.lineWidth = 1;
     ctx.beginPath();
     drawn.forEach((value, index) => {
@@ -220,6 +261,81 @@ window.Charts = (function () {
       else ctx.lineTo(x, y);
     });
     ctx.stroke();
+
+    drawAxes(ctx, plot, colours, {
+      spanLow: span.low,
+      spanHigh: span.high,
+      log: settings.scale === 'log',
+      firstLabel: labelFor(0),
+      lastLabel: labelFor(drawn.length - 1),
+      xLabel: settings.xLabel || 'episode',
+    });
+  }
+
+  /**
+   * The frame, the tick labels and the axis names.
+   *
+   * Charts here are small — 74 css px tall — so this is deliberately sparse:
+   * a baseline, a left rule, three y ticks and the first and last x value.
+   * Enough to read a magnitude and a range off, without turning a sparkline
+   * into a full plot.
+   *
+   * A log chart's tick labels are un-logged before they are written, so the
+   * numbers on the axis are the real quantity and never its logarithm.
+   */
+  function drawAxes(ctx, plot, colours, options) {
+    const font = C.charts.axisFont + ' '
+               + window.getComputedStyle(document.body).fontFamily;
+    ctx.save();
+    ctx.font = font;
+    ctx.strokeStyle = colours.hairline;
+    ctx.fillStyle = colours.hairline;
+    ctx.lineWidth = 1;
+    ctx.globalAlpha = 0.75;
+
+    // The two rules.
+    ctx.beginPath();
+    ctx.moveTo(plot.left, plot.top);
+    ctx.lineTo(plot.left, plot.top + plot.height);
+    ctx.lineTo(plot.left + plot.width, plot.top + plot.height);
+    ctx.stroke();
+
+    const shown = value => {
+      const real = options.log ? Math.pow(10, value) : value;
+      const size = Math.abs(real);
+      if (size !== 0 && (size < 0.01 || size >= 100000)) {
+        return real.toExponential(0);
+      }
+      if (size >= 100) return real.toFixed(0);
+      if (size >= 1) return real.toFixed(1);
+      return real.toFixed(3);
+    };
+
+    // Y ticks, from the top of the band down.
+    ctx.textAlign = 'right';
+    ctx.textBaseline = 'middle';
+    const ticks = Math.max(2, C.charts.ticksY);
+    for (let index = 0; index < ticks; index += 1) {
+      const share = index / (ticks - 1);
+      const value = options.spanHigh - share * (options.spanHigh
+                                                - options.spanLow);
+      const y = plot.top + share * plot.height;
+      ctx.fillText(shown(value), plot.left - 3, y);
+    }
+
+    // X: the first and last real value, and what the axis counts.
+    ctx.textBaseline = 'top';
+    ctx.textAlign = 'left';
+    ctx.fillText(String(options.firstLabel), plot.left,
+                 plot.top + plot.height + 3);
+    ctx.textAlign = 'right';
+    ctx.fillText(String(options.lastLabel), plot.left + plot.width,
+                 plot.top + plot.height + 3);
+    ctx.textAlign = 'center';
+    ctx.globalAlpha = 0.55;
+    ctx.fillText(options.xLabel, plot.left + plot.width / 2,
+                 plot.top + plot.height + 3);
+    ctx.restore();
   }
 
   /**
@@ -416,6 +532,10 @@ window.Charts = (function () {
         drawSeries(chart.canvas, values, colours, {
           scale: chart.series.scale,
           threshold: threshold,
+          smoothOnly: chart.series.smoothOnly,
+          xLabel: chart.series.xLabel,
+          // Real x values, so a bucketed axis still reads in episode numbers.
+          xValues: rows.map(entry => entry[chart.series.x || 'episode']),
         });
         // The label always shows the real number, never the logarithm.
         chart.latest.textContent = values.length

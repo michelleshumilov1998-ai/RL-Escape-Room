@@ -165,7 +165,20 @@
 
   <details class="section">
     <summary>Charts</summary>
-    <div class="section-body" id="charts"></div>
+    <div class="section-body">
+      <!-- The four headline numbers, read from the FULL training history
+           rather than the sampled episodes kept for replay. Built by
+           `paintDashboard` in shell.js; a planner room gets its own four. -->
+      <div class="dashboard" id="dashboard"></div>
+      <div class="chart-actions">
+        <button type="button" class="btn tiny" id="download-json"
+                title="Every training episode, the parameters, the seed and the
+                       results, as JSON">Download training results</button>
+        <button type="button" class="btn tiny" id="download-png"
+                title="All the graphs above, as one PNG">Save graphs (PNG)</button>
+      </div>
+      <div id="charts"></div>
+    </div>
   </details>
 
   <!-- Only for a chamber that has held-out layouts, which is room 5 alone.

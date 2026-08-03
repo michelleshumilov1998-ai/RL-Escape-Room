@@ -108,10 +108,17 @@ window.Producer = (function () {
    * either: Reset returns the chamber to the state it opened in.
    */
   async function restart(values) {
+    /* THE OLD BATCH IS DISCARDED FIRST, NOT LAST.
+       This used to clear it after the round trip, which left a window --
+       however long the far end takes to rebuild the room -- where `batch`
+       still served the run that was just thrown away. Anything painting from
+       it during that window showed the previous run's episodes: in room 5,
+       where a reset regenerates 150 layouts, that is seconds of a dashboard
+       reading 4000 episodes for a run that has none. */
+    batch = null;
     if (values) await S.setParameters(values);
     await S.reset();
     definition = S.describe.definition;
-    batch = null;
     return definition;
   }
 

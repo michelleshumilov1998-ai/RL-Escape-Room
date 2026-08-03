@@ -183,59 +183,54 @@ ROOM1 = {
 # Room 2 — the Broken Bridge Sector
 # ----------------------------------------------------------------------
 #
-# A sealed void through the middle of the sector, and two ways round it.
+# A lethal shaft through the middle of the sector, and two ways past it.
 #
-#   the span    7 steps along the bottom: two sound bridge sections with four
-#               collapsing planks between them. Every plank has a chance of
-#               giving way under the step that lands on it, and that is a
-#               fall. Crossed cleanly it is worth +93.
-#   the lap     21 steps: up the west wall, along the corridor at the top,
-#               down the east wall. Nothing on it can drop the agent, but
-#               four cells of the top corridor are iced, so it is not free
-#               of chance either. Worth +79.
+#   the span    9 steps: a steel gantry across the shaft. Two sound deck
+#               tiles ('G') carry the agent on and off, with four collapsing
+#               planks ('C') between them. Crossed cleanly it is worth +29.
+#   the way     21 steps: up the west wall, along the top, down the east.
+#   round       Nothing on it can drop the agent, but four cells of it are
+#               iced, so it is not free of chance either. Worth +17.
 #
-# WHERE THE RISK IS
-# A plank fails under the step that arrives on it, so the danger is the
-# crossing itself and it compounds: four planks at chance p get across with
-# probability (1-p)^4. At 0.10 that is about two attempts in three. Survive a
-# plank and it is gone behind you, so the span cannot be walked back — a step
-# returning onto a gap is the same fall. Which plank has already gone is part
-# of the state, so the agent is never asked to average "fine" with "fatal".
+# THE RISK IS ONE DRAW PER CROSSING, NOT ONE PER PLANK
+# `lands_on_sound_plank` returns true only for the step that takes the agent
+# from off the span on to a plank. So the collapse is sampled once, on the way
+# in; survive it and the whole gantry is crossed. The number on the slider is
+# therefore exactly the chance of losing a crossing:
+#
+#     P(a crossing fails) = collapse_chance
+#
+# Measured over 2000 attempts per setting: 0.10 -> 0.101, 0.25 -> 0.253,
+# 0.50 -> 0.524. It is NOT 1-(1-p)^4; the four planks do not each roll a die.
+# This was the other way round once, and it made the control unreadable — at
+# the 0.10 default the true risk was 34% under a label that said 10%.
 #
 # THE MARGIN, AND WHAT IT BUYS
-# The span is 14 ahead of the lap when it works (+93 against +79). That margin
-# cannot pay for a -100 fall across four compounding planks, so the collapse
-# slider moves the learned route only at the very bottom of its range:
-# measured, SARSA takes the span at 0.00 and the lap from 0.05 upward. The
-# room still trains and still escapes at every setting.
+# The span is 12 ahead of the way round when it works (+29 against +17). A
+# fall forfeits the exit as well as paying the penalty, so the span is worth
+# taking only while
 #
-# This is the documented design, restored. An earlier pass here widened the
-# margin (step -4, hazard -40, two planks) so the route would flip across a
-# 30-50% band. That was tuning, not compliance — the assignment fixes the grid
-# size, SARSA and an unknown model, and says nothing about reward magnitudes —
-# and it put the code out of step with the README. The narrower, documented
-# numbers are what ship.
+#     crossing risk  <  steps saved / (exit + fall penalty + steps walked in)
 #
-# WHAT IS ABOVE THE SPAN
-# The middle of the sector is walled off on three sides and open only downward
-# onto the planks: a dead-end maintenance void. A step up off a plank is legal
-# and costs -1, and leads nowhere. It is not a hazard, and the room's text no
-# longer claims otherwise.
+# At the documented +100/-100 that threshold is about 3% — the span is
+# irrational almost immediately and no 10x10 map can fix it. At +38/-15 it is
+# about 25%, which is where a slider is worth having. Measured across five
+# seeds: span at 0.00, 0.05, 0.10 and 0.20; mixed 2/5 at 0.30; the way round
+# at 0.40 and 0.60.
+#
+# THERE IS NO WALKABLE SPACE BESIDE THE SPAN
+# Every plank has shaft directly above and directly below it, so stepping
+# sideways off the gantry is impossible rather than merely discouraged. A test
+# enforces that each plank's four neighbours are shaft, wall or span.
 #
 # THE ICE
-# The assignment calls for several slippery cells here, and there are four,
-# on the top corridor of the lap. They are there rather than on the span
-# because placement was measured, not argued: ice on the planks lets the
-# agent slip clear of the cell it aimed at, which made the span the learned
-# route at every collapse setting and inverted the room's whole lesson. Ice
-# on the lap leaves every route decision exactly as it was without it —
-# span at 0.00, lap from 0.05 up — while making the safe way round genuinely
-# stochastic, which is what SARSA is here to price.
+# Four slippery cells, at the two corners of the way round: one before a turn,
+# one after it, and one against a wall on each side. Each has one side open and
+# one side solid, so a slip costs progress or bumps stone — never two
+# identical outcomes, and never a fall, because nothing beside that corridor
+# is lethal.
 #
-# Nothing beside that corridor is fatal: the middle is walled off, so a slip
-# is a bump into stone at -2, never a fall.
-#
-# 'C' is the collapsing tile; 'G' the sound bridge sections either side;
+# 'H' is the shaft; 'C' the collapsing planks; 'G' the sound deck either side;
 # '~' the ice.
 #
 #        c0 c1 c2 c3 c4 c5 c6 c7 c8 c9
@@ -297,6 +292,35 @@ ROOM2 = {
     # room can pay, so every action is tried before one is settled on.
     "parameter_defaults": {"q_init": 30.0},
 
+    # THE TRAINING DASHBOARD.
+    #
+    # Named explicitly rather than falling back to the shared four, so that
+    # every title says what the series actually is:
+    #
+    #   "Episode Return"  is the sum of every reward in the episode, G = Sum r,
+    #                     not the last reward. `session._log_episode` writes it
+    #                     from a running total.
+    #   "Smoothed Return" is a 20-episode trailing mean of that same series,
+    #                     computed on the FULL history before any downsampling.
+    #   "Loss / Mean |TD Error|" is mean(|delta|) over the episode, where delta
+    #                     is the temporal-difference error of whichever method
+    #                     is running. There is no neural network in this
+    #                     project and this is NOT a network loss -- it is the
+    #                     loss-like convergence diagnostic the method itself
+    #                     produces. See `session._log_episode`.
+    #   "Success rate"    is a 20-episode mean of a 0/1 indicator taken from
+    #                     `info["goal"]`, not from a reward threshold.
+    "charts": [
+        {"key": "reward", "label": "Episode Return (total reward)"},
+        {"key": "reward", "smoothOnly": True,
+         "label": "Smoothed Return (20-episode moving average)"},
+        {"key": "convergence", "label": "Loss / Mean |TD Error|"},
+        {"key": "epsilon", "label": "Exploration rate \u03b5"},
+        {"key": "steps", "label": "Steps per episode"},
+        {"key": "success", "smoothOnly": True,
+         "label": "Success rate (20-episode moving average)"},
+    ],
+
     "metric": {"key": "meanReward", "label": "Mean reward", "format": "%.1f"},
 
     # DECOR IS SCENERY. IT IS NOT PART OF THE ROOM.
@@ -322,8 +346,8 @@ ROOM2 = {
         "obstacles": [
             "A shaft fills the middle of the sector. Entering it anywhere "
             "ends the run.",
-            "One steel span crosses it: two sound deck sections with four "
-            "planks between them. It is the only way over.",
+            "One steel span crosses it, and it is the only way over: a "
+            "gantry of four planks with solid deck at either end.",
             "The span is risked once, as R-5 steps on to it. Survive that "
             "and the whole crossing is made.",
             "The way round is safe from the span, but four cells of it are "
@@ -460,6 +484,35 @@ ROOM3 = {
     # A long delayed reward needs a discount close to one to reach the start
     # at all, and enough episodes to get there.
     "parameter_defaults": {"gamma": 0.99, "episodes": 4000, "q_init": 0.0},
+
+    # THE TRAINING DASHBOARD.
+    #
+    # Named explicitly rather than falling back to the shared four, so that
+    # every title says what the series actually is:
+    #
+    #   "Episode Return"  is the sum of every reward in the episode, G = Sum r,
+    #                     not the last reward. `session._log_episode` writes it
+    #                     from a running total.
+    #   "Smoothed Return" is a 20-episode trailing mean of that same series,
+    #                     computed on the FULL history before any downsampling.
+    #   "Loss / Mean |TD Error|" is mean(|delta|) over the episode, where delta
+    #                     is the temporal-difference error of whichever method
+    #                     is running. There is no neural network in this
+    #                     project and this is NOT a network loss -- it is the
+    #                     loss-like convergence diagnostic the method itself
+    #                     produces. See `session._log_episode`.
+    #   "Success rate"    is a 20-episode mean of a 0/1 indicator taken from
+    #                     `info["goal"]`, not from a reward threshold.
+    "charts": [
+        {"key": "reward", "label": "Episode Return (total reward)"},
+        {"key": "reward", "smoothOnly": True,
+         "label": "Smoothed Return (20-episode moving average)"},
+        {"key": "convergence", "label": "Loss / Mean |TD Error|"},
+        {"key": "epsilon", "label": "Exploration rate \u03b5"},
+        {"key": "steps", "label": "Steps per episode"},
+        {"key": "success", "smoothOnly": True,
+         "label": "Success rate (20-episode moving average)"},
+    ],
 
     "metric": {"key": "meanReward", "label": "Mean reward", "format": "%.1f"},
     "episode_metric": "reward",
@@ -673,6 +726,36 @@ ROOM4 = {
     # `playback.stepsPerSecond` in `definition.py` already exists to fix.
     "live_step_scale": 12,
 
+    # THE TRAINING DASHBOARD.
+    #
+    # Named explicitly rather than falling back to the shared four, so that
+    # every title says what the series actually is:
+    #
+    #   "Episode Return"  is the sum of every reward in the episode, G = Sum r,
+    #                     not the last reward. `session._log_episode` writes it
+    #                     from a running total.
+    #   "Smoothed Return" is a 20-episode trailing mean of that same series,
+    #                     computed on the FULL history before any downsampling.
+    #   "Loss / Mean |TD Error|" is mean(|delta|) over the episode, where delta
+    #                     is the temporal-difference error of whichever method
+    #                     is running. There is no neural network in this
+    #                     project and this is NOT a network loss -- it is the
+    #                     loss-like convergence diagnostic the method itself
+    #                     produces. See `session._log_episode`.
+    #   "Success rate"    is a 20-episode mean of a 0/1 indicator taken from
+    #                     `info["goal"]`, not from a reward threshold.
+    "charts": [
+        {"key": "reward", "label": "Episode Return (total reward)"},
+        {"key": "reward", "smoothOnly": True,
+         "label": "Smoothed Return (20-episode moving average)"},
+        {"key": "convergence", "label": "Loss / Mean |TD Error|"},
+        {"key": "epsilon", "label": "Exploration rate \u03b5"},
+        {"key": "steps", "label": "Steps per episode (physics steps of 0.02 s)"},
+        {"key": "success", "smoothOnly": True,
+         "label": "Success rate (20-episode moving average)"},
+        {"key": "weightNorm", "label": "Weight norm \u2016w\u2016"},
+    ],
+
     "metric": {"key": "meanReward", "label": "Mean reward", "format": "%.1f"},
     "episode_metric": "reward",
     "comparison": True,
@@ -721,17 +804,33 @@ ROOM4 = {
         "termination": "The run ends on a landing, on a crash-landing, "
                        "against a wall or a pillar, and otherwise when the "
                        "step limit is reached.",
+        # STATED EXPLICITLY BECAUSE IT IS THE THING MOST OFTEN MISREAD.
+        # The state is four continuous numbers. There is no angle in it and no
+        # angular velocity: the tilt the renderer draws is atan2(vy, vx), a
+        # display value computed from the velocity for the picture's sake, and
+        # the learner never sees it.
+        "state": "Four continuous numbers: (x, y, vx, vy). x and y are the "
+                 "position in metres; vx and vy are the velocity components in "
+                 "metres per second, each clamped to the range [-1, 1]. The "
+                 "world advances in steps of dt = 0.02 s. There is no angle "
+                 "and no angular velocity in the state \u2014 the tilt drawn "
+                 "on screen is atan2(vy, vx), a display value only.",
         "note": "This is the room where a table stops working. The state is "
                 "four real numbers, so there are infinitely many states and "
                 "no row can be kept for each; two states differing in the "
                 "sixth decimal are the same situation and must not be learned "
-                "about separately. The two function-approximation methods "
-                "cover the space with eight overlapping grids of tiles and "
-                "learn a weight per tile, so what is learned about one place "
-                "carries to the places around it. The third method rounds the "
-                "state into buckets and uses an ordinary table; it is here to "
-                "be compared against, and the bucket count is a slider so "
-                "that both ways of failing can be watched.",
+                "about separately. The actions are discrete \u2014 hold, up, "
+                "down, left, right \u2014 but each one applies an "
+                "acceleration rather than moving the drone to the next "
+                "square: thrust changes the velocity, drag decays it, and the "
+                "position is carried by the new velocity. The two "
+                "function-approximation methods cover the space with eight "
+                "overlapping grids of tiles and learn a weight per tile, so "
+                "what is learned about one place carries to the places around "
+                "it. The third method rounds the state into buckets and uses "
+                "an ordinary table; it is here to be compared against, and "
+                "the bucket count is a slider so that both ways of failing "
+                "can be watched.",
     },
 }
 
@@ -927,8 +1026,9 @@ ROOM5 = {
     "parameter_defaults": {"gamma": 0.97, "alpha": 0.20, "epsilon_min": 0.05,
                            "epsilon_decay": 0.9985, "episodes": 4000},
 
-    # One decision every five ticks of physics — 0.1 s. See `WarehouseWorld.step`
-    # for the measurement that forced it.
+    # One decision is held for TEN ticks of physics. The tick is dt = 0.02 s,
+    # so a decision lasts 10 x 0.02 = 0.2 s. See `WarehouseWorld.step` for the
+    # measurement that forced holding an action at all.
     "action_repeat": 10,
 
     # A share of training episodes start at the terminal in stage 1, so the
@@ -937,7 +1037,8 @@ ROOM5 = {
     # See `WarehouseWorld.reset`.
     "stage_one_share": 0.4,
 
-    # In *decisions*, so 300 of them is 3000 ticks and 30 seconds of flight.
+    # In *decisions*, not ticks. 300 decisions x 10 ticks x 0.02 s = 3000
+    # ticks and 60 seconds of simulated flight.
     "max_steps": 300,
 
     # ------------------------------------------------------------------
@@ -996,14 +1097,17 @@ ROOM5 = {
     # on escapes and 0 otherwise becomes an escape *rate* without anything
     # having to smooth it first.
     "charts": [
-        {"key": "reward", "label": "Reward per episode (with moving average)"},
-        {"key": "steps", "label": "Episode length"},
+        {"key": "reward", "label": "Episode Return (total reward)"},
+        {"key": "reward", "smoothOnly": True,
+         "label": "Smoothed Return (20-episode moving average)"},
+        {"key": "steps",
+         "label": "Decisions per episode (0.2 s each)"},
         {"key": "success", "label": "Complete escape rate"},
         {"key": "terminalReached", "label": "Terminal activation rate"},
         {"key": "collision", "label": "Collision rate"},
         {"key": "timeout", "label": "Timeout rate"},
         {"key": "epsilon", "label": "Exploration rate ε"},
-        {"key": "convergence", "label": "Mean |TD error|"},
+                {"key": "convergence", "label": "Loss / Mean |TD Error|"},
         {"key": "weightNorm", "label": "Weight norm ‖w‖"},
         # The one series that does not come from the training episodes: three
         # lines from the periodic held-out checkpoints.

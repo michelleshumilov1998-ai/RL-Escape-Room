@@ -439,12 +439,19 @@ PARAMETERS = {
         # what the room does out of the box.
         "minimum": 0.0, "maximum": 1.0, "step": 0.05, "default": 0.10,
         "scope": "reset",
-        "explanation": "The chance that a bridge section gives way under the "
-                       "step that lands on it, which is a fall. Two sections "
-                       "in a row, so at 0.10 about four crossings in five get "
-                       "across and at 0.30 about half do. Changing it changes "
-                       "the environment, so the learned policy is discarded "
-                       "and has to be retrained.",
+        # MEASURED, NOT ASSUMED. `lands_on_sound_plank` returns true only for
+        # the step that moves the agent from off the span on to a plank, so the
+        # draw is made once per crossing attempt. Verified over 2000 attempts
+        # per setting: p=0.10 fails 0.101 of the time, p=0.25 fails 0.253,
+        # p=0.50 fails 0.524 -- the slider value itself, not 1-(1-p)^4.
+        "explanation": "The probability that one attempted bridge crossing "
+                       "fails. The random draw is made once, when the agent "
+                       "first enters the collapsing span. If the draw "
+                       "succeeds, the crossing fails; otherwise the agent may "
+                       "cross the entire span. At 0.10, each attempted "
+                       "crossing has a 10% failure probability. Changing this "
+                       "value changes the environment, so the current learned "
+                       "policy must be discarded and retrained.",
     },
     "alpha": {
         "label": "Learning rate",
@@ -587,9 +594,11 @@ PARAMETERS = {
         "symbol": "",
         "minimum": 100, "maximum": 800, "step": 25, "default": 300,
         "scope": "reset",
-        "explanation": "How many decisions an episode may last before it times "
-                       "out. One decision is 0.1 s of flight, so 300 is 30 "
-                       "seconds — enough for both stages of the mission.",
+        "explanation": "How many agent decisions an episode may last before "
+                       "it times out. Each decision is held for 10 physics "
+                       "ticks of 0.02 seconds, so one decision lasts 0.2 "
+                       "seconds and 300 decisions represent at most 60 "
+                       "seconds of simulated flight.",
     },
     "train_layouts": {
         "label": "Training layouts",

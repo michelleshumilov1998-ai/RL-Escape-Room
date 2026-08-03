@@ -163,7 +163,13 @@ window.ROOM_CONFIG = {
     smoothingWindow: 20,      // rolling average, in episodes
     maxPointsDrawn: 900,      // beyond this the series is bucketed
     rawOpacity: 0.34,
-    padding: { top: 5, right: 3, bottom: 5, left: 3 },
+    // Room for the tick labels: the axes are drawn inside the canvas, so the
+    // plot has to be inset far enough for a y label on the left and an x
+    // label underneath.
+    padding: { top: 6, right: 6, bottom: 14, left: 30 },
+    axisFont: '9px',           // tick labels
+    ticksX: 4,
+    ticksY: 3,
   },
 
   /* ---- the episode browser ----------------------------------------- *

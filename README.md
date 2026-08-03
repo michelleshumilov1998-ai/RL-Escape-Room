@@ -248,6 +248,9 @@ therefore exactly the chance of losing a crossing:
 effective crossing risk = p          (not 1 − (1 − p)^4)
 ```
 
+Measured over 2000 attempts per setting: `p=0.10 → 0.101`, `p=0.25 → 0.253`,
+`p=0.50 → 0.524`. A test in `tests/test_defense_metrics.py` enforces it.
+
 ### Slippery cells
 
 Four iced cells sit at the two corners of the safe route — before a turn, after
@@ -421,7 +424,9 @@ Q-Learning, SARSA and Expected SARSA are offered for contrast.
 ### A continuous world
 
 A wind tunnel of **10 × 10 metres**, integrated at `dt = 0.02 s` with
-semi-implicit Euler. There is no grid.
+semi-implicit Euler. There is no grid. An episode may last 1800 physics steps,
+which is `1800 x 0.02 = 36 s` of simulated flight — Room 4 records every tick,
+where Room 5 records one frame per held decision.
 
 * Two banks of fans drive air down across the approach
 * Turbine housings and the chamber wall are solid
@@ -527,7 +532,17 @@ handed to the learner is 14 numbers — local features only.
 ### Continuous movement
 
 The same integrator as Room 4 (`dt = 0.02 s`), with `action_repeat = 10`: one
-decision every 0.2 s, held for ten physics ticks.
+decision is held for ten physics ticks, so a decision lasts
+
+```
+action_repeat x dt = 10 x 0.02 = 0.2 s
+```
+
+and the 300-decision episode limit is
+
+```
+300 x 0.2 = 60 s of simulated flight
+```
 
 ### Obstacle avoidance and the two-stage mission
 
@@ -590,7 +605,7 @@ single unseen layout on demand.
 | Drone count variation | 0 – 3 | 1 |
 | Drone speed | 0.1 – 1.5 | 0.35 |
 | Storage shelves | 0 – 8 | 3 |
-| Episode length (steps) | 100 – 800 | 300 |
+| Episode length (agent decisions, 0.2 s each) | 100 – 800 | 300 |
 | Training layouts | 10 – 400 | 120 |
 | Validation layouts | 5 – 100 | 10 |
 | Unseen test layouts | 5 – 100 | 20 |
@@ -638,48 +653,102 @@ been moved but not applied.
 
 ## Graphs
 
-### Rooms 2, 3 and 4 — the shared four
+Every graph is drawn from the run that actually happened. The moving average is
+computed over the **full** episode history before the series is reduced for
+drawing, so a "20-episode moving average" is exactly that and not an average of
+buckets.
+
+### The training dashboard
+
+Above the graphs, four headline numbers, read from the complete training
+history rather than the sampled episodes kept for replay:
+
+| Rooms 2–5 | Room 1 (planner) |
+|---|---|
+| Episodes done | Sweeps done |
+| Last episode return | V(start) |
+| Best episode return | Latest delta |
+| Exploration ε | Threshold θ |
+
+Room 1 gets its own four because Value Iteration has no episodes and no
+exploration rate; showing empty episode cards there would be misleading.
+
+### Rooms 2 and 3 — six graphs
 
 | Graph | What it measures |
 |---|---|
-| **Reward per episode** | Total return per episode. The headline learning curve: it should rise and then flatten. |
-| **Steps per episode** | Episode length. Falls as the agent stops wandering; in Room 4 it reflects flight time. |
-| **Exploration rate** | ε as it decays. Explains *why* the reward curve changes: early noise is exploration, not failure. |
-| **Convergence measure** | The magnitude of the learning update. Approaching zero means the value estimates have stopped moving. |
+| **Episode Return (total reward)** | `G = r₁ + r₂ + … + r_T`, the sum of every reward in the episode — not the last reward |
+| **Smoothed Return (20-episode moving average)** | `smooth[i] = mean(reward[i−19 … i])` over the full history |
+| **Loss / Mean \|TD Error\|** | `mean(\|δ\|)` over the episode. See the note below |
+| **Exploration rate ε** | The decay schedule, so early noise reads as exploration rather than failure |
+| **Steps per episode** | Falls as the agent stops wandering |
+| **Success rate (20-episode moving average)** | A 0/1 indicator from `info["goal"]`, averaged — not a reward threshold |
 
-### Room 1 — the planner
-
-| Graph | What it measures |
-|---|---|
-| **Largest value change per sweep** | The largest change to any state's value in one sweep, on a logarithmic axis, with the stopping threshold θ as a dashed line. This is exactly the quantity the stopping rule tests — the run halts when the curve crosses the line. |
-
-Room 1 shows only this graph because Value Iteration has no episodes and no
-exploration rate; the episodic graphs would be permanently empty.
-
-### Room 5 — ten graphs
+### Room 4 — the same six, plus
 
 | Graph | What it measures |
 |---|---|
-| **Reward per episode (with moving average)** | Return, with a rolling mean over the noise of random layouts |
-| **Episode length** | Decisions taken before the episode ended |
-| **Complete escape rate** | Fraction of episodes finishing the whole two-stage mission |
-| **Terminal activation rate** | Fraction reaching stage 1 — progress even when the escape fails |
-| **Collision rate** | Fraction ending against a shelf, wall, drone or beam |
-| **Timeout rate** | Fraction that simply ran out of steps |
-| **Exploration rate ε** | The decay schedule |
-| **Mean \|TD error\|** | Average magnitude of the temporal-difference error — the approximation's own convergence signal |
-| **Weight norm ‖w‖** | Size of the learned weight vector; a diverging norm is the classic failure mode of semi-gradient methods |
-| **Escape rate — train vs validation vs unseen test** | Three lines from frozen-weight evaluation. **The graph the room exists for**: the gap between train and unseen is the generalisation gap. |
+| **Weight norm ‖w‖** | Size of the learned weight vector. A norm growing without bound is the classic divergence mode of semi-gradient methods |
+
+Room 4's step graph is labelled **physics steps of 0.02 s**, because it records
+every tick.
+
+### Room 5 — eleven graphs
+
+Episode Return · Smoothed Return (20) · **Decisions per episode (0.2 s each)** ·
+Complete escape rate · Terminal activation rate · Collision rate · Timeout rate ·
+Exploration rate ε · Loss / Mean |TD Error| · Weight norm ‖w‖ ·
+**Escape rate — train vs validation vs unseen test**
+
+The last one is the graph the room exists for: the gap between train and unseen
+is the generalisation gap.
+
+### Room 1 — one graph
+
+| Graph | What it measures |
+|---|---|
+| **Largest value change per sweep** | The largest change to any state's value in one sweep, on a logarithmic axis, with the stopping threshold θ drawn as a dashed line that follows its slider. This is exactly the quantity the stopping rule tests |
+
+### What "Loss" means here
+
+There is **no neural network in this project**, so there is no network loss.
+The quantity plotted under `Loss / Mean |TD Error|` is the method's own
+convergence diagnostic:
+
+```
+convergence = mean(|δ_t|)      over the steps of the episode
+
+Q-Learning:  δ = r + γ·max_a' Q(s',a') − Q(s,a)
+SARSA:       δ = r + γ·Q(s',a')        − Q(s,a)
+```
+
+In `game/session.py` this is accumulated as `errorTotal += abs(error)` with a
+matching `errorCount`, and divided at the end of the episode. It is a **mean**,
+so a long episode does not score highly merely for being long. It is not MSE,
+not Huber loss and not a DQN loss.
 
 ### Method comparison
 
 Every room can run its offered methods against the same layout, parameters and
-seed, and draw the resulting curves on one set of axes. The results panel is
-**hidden until at least two methods have produced real curves** — there is no
-empty chart and no fabricated data. If fewer than two produce a curve, the
-panel says so in words.
+seed, and draw the curves on one set of axes. The results panel stays hidden
+until at least two methods have produced real curves — no empty chart, and no
+fabricated data.
 
----
+### Saving the results
+
+Two buttons above the graphs, both inert until there is something to save:
+
+* **Download training results** — a JSON file with the room, the algorithm, every
+  parameter, the seed, a timestamp, the step units, a summary (episodes, best
+  return, final return, final ε, outcome counts), the **full per-episode
+  history**, the frozen-weight checkpoints and the evaluation report. Evaluation
+  is under its own key and the greedy replay is excluded, so neither can be
+  mistaken for training episodes. For Room 1 it saves the sweep-by-sweep
+  convergence curve instead.
+* **Save graphs (PNG)** — every graph on screen, stacked into one image, drawn
+  from the same canvases that are displayed. No charting library.
+
+Filenames carry the room, the algorithm and a timestamp.
 
 ## Replay System
 
@@ -790,7 +859,7 @@ RL-Escape-Room/
 │           ├── contract.js   the data contract, documented
 │           └── ending.js     the final victory sequence
 │
-└── tests/                    pytest suite (286 tests)
+└── tests/                    pytest suite (300 tests)
 ```
 
 ---
@@ -815,7 +884,7 @@ To run the test suite:
 
 ```bash
 pip install -r requirements.txt      # pytest, for the tests only
-python3 -m pytest                    # 286 tests
+python3 -m pytest                    # 300 tests
 ```
 
 ---

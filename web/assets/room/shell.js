@@ -52,6 +52,9 @@
     roomInfo: document.getElementById('room-info'),
     algorithmInfo: document.getElementById('algorithm-info'),
     charts: document.getElementById('charts'),
+    dashboard: document.getElementById('dashboard'),
+    downloadJson: document.getElementById('download-json'),
+    downloadPng: document.getElementById('download-png'),
     episodeList: document.getElementById('episode-list'),
     episodeDetail: document.getElementById('episode-detail'),
     scrub: document.getElementById('scrub'),
@@ -497,6 +500,10 @@
     dom.roomInfo.appendChild(rewards);
 
     dom.roomInfo.appendChild(block('Terminal condition', info.terminal));
+    // What the learner's state actually is. Only the rooms that send it get a
+    // row: a continuous room's state is the thing most easily misread from the
+    // picture on screen, so room 4 spells it out.
+    if (info.state) dom.roomInfo.appendChild(block('State', info.state));
     if (info.note) dom.roomInfo.appendChild(block('Note', info.note));
   }
 
@@ -1272,6 +1279,298 @@
     dom.strip.objective.dataset.stage = String(stage);
   }
 
+  /* ---------------------------------------------------------------------
+     The training dashboard, and saving what it shows
+     ------------------------------------------------------------------- */
+
+  /**
+   * The full per-episode training history.
+   *
+   * `batch.history` is one row per episode ever trained, which is what these
+   * numbers have to be read from. The sampled episodes kept for replay are a
+   * few dozen out of thousands, so a "best return" taken from those would be
+   * the best of the sample rather than the best of the run.
+   *
+   * Evaluation and replay never appear here: `session._log_episode` is called
+   * from the training step alone, and the frozen-weight checkpoints live in
+   * `batch.checkpoints`.
+   */
+  function trainingHistory() {
+    const batch = ui.recorded || window.Producer.batch || {};
+    const rows = batch.history || [];
+    return rows.filter(row => row && typeof row.reward === 'number'
+                              && isFinite(row.reward));
+  }
+
+  function dashboardCard(label, value, accent) {
+    const card = element('div', 'dashboard-card');
+    card.appendChild(element('p', 'dashboard-label', label));
+    const shown = element('p', 'dashboard-value', value);
+    if (accent) shown.classList.add('is-accent');
+    card.appendChild(shown);
+    return card;
+  }
+
+  /**
+   * The four headline numbers.
+   *
+   * A planner has no episodes, no returns and no exploration rate, so room 1
+   * is given the four numbers it does have rather than four empty cards or —
+   * worse — four that look real and are not.
+   */
+  function paintDashboard() {
+    if (!dom.dashboard || !ui.room) return;
+    dom.dashboard.innerHTML = '';
+
+    const snapshot = window.Producer.snapshot;
+    const planner = snapshot && snapshot.progress
+                 && snapshot.progress.unit === 'sweeps';
+
+    if (planner) {
+      const progress = snapshot.progress || {};
+      const learned = snapshot.learned || {};
+      const theta = ui.parameters.theta;
+      dom.dashboard.appendChild(dashboardCard(
+        'Sweeps done', String(progress.count === undefined
+                              ? '—' : progress.count)));
+      dom.dashboard.appendChild(dashboardCard(
+        'V(start)', typeof learned.startValue === 'number'
+          ? learned.startValue.toFixed(2) : '—', true));
+      dom.dashboard.appendChild(dashboardCard(
+        'Latest delta', typeof progress.delta === 'number'
+          ? progress.delta.toExponential(1) : '—'));
+      dom.dashboard.appendChild(dashboardCard(
+        'Threshold \u03b8', typeof theta === 'number'
+          ? theta.toExponential(0) : '—'));
+      // A planner has results to save too -- its convergence curve -- so the
+      // buttons follow the sweep count rather than an episode count it will
+      // never have.
+      const swept = (progress.count || 0) > 0;
+      if (dom.downloadJson) dom.downloadJson.disabled = !swept;
+      if (dom.downloadPng) dom.downloadPng.disabled = !swept;
+      return;
+    }
+
+    const history = trainingHistory();
+    const returns = history.map(row => row.reward);
+    const last = returns.length ? returns[returns.length - 1] : null;
+    const best = returns.length ? Math.max.apply(null, returns) : null;
+    // The epsilon of the last COMPLETED episode. While one is still running
+    // the algorithm's current value is shown instead, which is the honest
+    // answer to "what is it exploring at right now".
+    const epsilonRow = history.length
+      ? history[history.length - 1].epsilon : null;
+    const epsilonLive = snapshot && snapshot.learned
+      ? snapshot.learned.epsilon : null;
+    const epsilon = typeof epsilonRow === 'number' ? epsilonRow : epsilonLive;
+
+    dom.dashboard.appendChild(dashboardCard(
+      'Episodes done', String(history.length)));
+    dom.dashboard.appendChild(dashboardCard(
+      'Last episode return', last === null ? '—' : last.toFixed(1)));
+    dom.dashboard.appendChild(dashboardCard(
+      'Best episode return', best === null ? '—' : best.toFixed(1), true));
+    dom.dashboard.appendChild(dashboardCard(
+      'Exploration \u03b5', typeof epsilon === 'number'
+        ? epsilon.toFixed(3) : '—'));
+
+    if (dom.downloadJson) dom.downloadJson.disabled = history.length === 0;
+    if (dom.downloadPng) dom.downloadPng.disabled = history.length === 0;
+  }
+
+  /** Trigger a browser download of one blob. */
+  function saveBlob(blob, filename) {
+    const url = window.URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = filename;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    window.setTimeout(() => window.URL.revokeObjectURL(url), 1000);
+  }
+
+  function stamp() {
+    const now = new Date();
+    const pad = value => String(value).padStart(2, '0');
+    return now.getFullYear() + pad(now.getMonth() + 1) + pad(now.getDate())
+         + '-' + pad(now.getHours()) + pad(now.getMinutes());
+  }
+
+  function exportBaseName() {
+    const room = (ui.roomId || 'room').replace(/[^a-z0-9]/gi, '');
+    const algorithm = (ui.algorithm || 'algorithm')
+      .replace(/[^a-z0-9_]/gi, '');
+    return room + '-' + algorithm + '-' + stamp();
+  }
+
+  /**
+   * Everything the run produced, as JSON.
+   *
+   * Training history only. The frozen-weight evaluation is included under its
+   * own key so it cannot be mistaken for training episodes, and the greedy
+   * replay is not included at all — it is not an episode that was learned
+   * from.
+   */
+  function downloadResults() {
+    const history = trainingHistory();
+    const batch = ui.recorded || window.Producer.batch || {};
+    const snapshot = window.Producer.snapshot || {};
+
+    /* A PLANNER HAS NO EPISODES, AND STILL HAS RESULTS.
+       Room 1 measures itself per sweep, so what is saved is the convergence
+       curve the far end sends, the sweep count and the stopping threshold --
+       not an empty episode list under headings that would all read zero. */
+    const progress = snapshot.progress || {};
+    if (progress.unit === 'sweeps') {
+      const curve = snapshot.curve || {};
+      const points = curve.points || [];
+      if (!points.length) return;
+      saveBlob(new Blob([JSON.stringify({
+        room: { id: ui.roomId, name: ui.room.name, sector: ui.room.sector },
+        algorithm: { key: ui.algorithm,
+                     label: labelOfAlgorithm(ui.algorithm) },
+        parameters: currentParameters(),
+        seed: snapshot.seed === undefined ? null : snapshot.seed,
+        exportedAt: new Date().toISOString(),
+        measuredIn: curve.xLabel || 'sweeps',
+        summary: {
+          sweeps: progress.count,
+          converged: Boolean(progress.converged),
+          threshold: ui.parameters.theta,
+          startValue: (snapshot.learned || {}).startValue,
+          finalDelta: points[points.length - 1],
+        },
+        // One point per sweep: the largest change to any state's value.
+        convergenceCurve: points.map((value, index) => ({
+          sweep: (curve.x && curve.x[index]) || index + 1,
+          largestValueChange: value,
+        })),
+      }, null, 2)], { type: 'application/json' }),
+        exportBaseName() + '.json');
+      return;
+    }
+
+    if (!history.length) return;
+    const returns = history.map(row => row.reward);
+    const outcomes = {};
+    history.forEach(row => {
+      outcomes[row.outcome] = (outcomes[row.outcome] || 0) + 1;
+    });
+
+    const payload = {
+      room: { id: ui.roomId, number: ui.roomId.replace('room', ''),
+              name: ui.room.name, sector: ui.room.sector },
+      algorithm: { key: ui.algorithm,
+                   label: labelOfAlgorithm(ui.algorithm) },
+      parameters: currentParameters(),
+      seed: snapshot.seed === undefined ? null : snapshot.seed,
+      exportedAt: new Date().toISOString(),
+      // What a "step" counts in this room, so the numbers below are readable
+      // without having to know the room.
+      stepUnits: stepUnits(),
+      summary: {
+        episodes: history.length,
+        bestReturn: Math.max.apply(null, returns),
+        finalReturn: returns[returns.length - 1],
+        finalEpsilon: history[history.length - 1].epsilon,
+        outcomes: outcomes,
+      },
+      // One row per episode ever trained -- not the replay sample.
+      episodeHistory: history,
+      checkpoints: batch.checkpoints || [],
+      evaluation: batch.evaluation || null,
+    };
+    saveBlob(new Blob([JSON.stringify(payload, null, 2)],
+                      { type: 'application/json' }),
+             exportBaseName() + '.json');
+  }
+
+  /** The label a method goes by, from the list the far end sent. */
+  function labelOfAlgorithm(key) {
+    const found = (window.Producer.algorithms || []).filter(
+      entry => entry.key === key);
+    return found.length ? found[0].label : key;
+  }
+
+  /**
+   * What one recorded step means in this room, so an exported file can say so.
+   *
+   * Derived from `playback.stepsPerSecond`, which is the room's own statement
+   * of how much simulated time one recorded frame covers. Room 4 records every
+   * physics tick, so that is 50/s and 0.02 s a step. Room 5 records one frame
+   * per decision at 5/s, so 0.2 s a decision -- ten ticks of 0.02 s. A grid
+   * room's step has no duration and says so rather than inventing one.
+   */
+  function stepUnits() {
+    const room = ui.room || {};
+    if (room.isGrid) {
+      return { name: 'grid steps', secondsEach: null };
+    }
+    const rate = (room.playback || {}).stepsPerSecond;
+    const seconds = rate ? 1 / rate : null;
+    return {
+      // A frame worth more than a physics tick is a held decision.
+      name: seconds && seconds > 0.05 ? 'agent decisions' : 'physics steps',
+      secondsEach: seconds,
+    };
+  }
+
+  /**
+   * Every graph on screen, stacked into one PNG.
+   *
+   * Drawn from the chart canvases that already exist, so what is saved is
+   * exactly what was on screen -- no second rendering path to disagree with
+   * the first, and no charting library.
+   */
+  function downloadCharts() {
+    const wrappers = Array.prototype.slice.call(
+      dom.charts.querySelectorAll('.chart'));
+    const drawable = wrappers.filter(
+      wrapper => wrapper.querySelector('canvas'));
+    if (!drawable.length) return;
+
+    const ratio = window.devicePixelRatio || 1;
+    const width = Math.max.apply(null, drawable.map(
+      wrapper => wrapper.querySelector('canvas').width));
+    const titleHeight = Math.round(18 * ratio);
+    const gap = Math.round(8 * ratio);
+    let height = Math.round(10 * ratio);
+    drawable.forEach(wrapper => {
+      height += titleHeight + wrapper.querySelector('canvas').height + gap;
+    });
+
+    const sheet = document.createElement('canvas');
+    sheet.width = width;
+    sheet.height = height;
+    const ctx = sheet.getContext('2d');
+    const style = window.getComputedStyle(document.documentElement);
+    ctx.fillStyle = style.getPropertyValue('--base').trim() || '#07090C';
+    ctx.fillRect(0, 0, sheet.width, sheet.height);
+    ctx.fillStyle = style.getPropertyValue('--title').trim() || '#FFFFFF';
+    ctx.font = Math.round(11 * ratio) + 'px '
+             + window.getComputedStyle(document.body).fontFamily;
+    ctx.textBaseline = 'top';
+
+    let y = Math.round(5 * ratio);
+    drawable.forEach(wrapper => {
+      const head = wrapper.querySelector('.chart-head');
+      const canvas = wrapper.querySelector('canvas');
+      const label = head ? head.firstChild.textContent.trim() : '';
+      const latest = wrapper.querySelector('.chart-latest');
+      ctx.fillText(label + (latest && latest.textContent
+        ? '   ' + latest.textContent.trim() : ''),
+        Math.round(4 * ratio), y);
+      y += titleHeight;
+      ctx.drawImage(canvas, 0, y);
+      y += canvas.height + gap;
+    });
+
+    sheet.toBlob(blob => {
+      if (blob) saveBlob(blob, exportBaseName() + '-graphs.png');
+    }, 'image/png');
+  }
+
   function paintStrip() {
     /* The environment settings are painted here as well as from the live
        strip, because `paintLiveStrip` only runs while training is going. At
@@ -1412,6 +1711,7 @@
     paintFinalRouteHint();
     paintInspector();
     if (ui.repaintCharts) ui.repaintCharts(chartData(), chartContext());
+      paintDashboard();
   }
 
   /* ---------------------------------------------------------------------
@@ -1605,6 +1905,7 @@
       buildInspectorEpisodes();
       paintInspector();
       if (ui.repaintCharts) ui.repaintCharts(batch, chartContext());
+      paintDashboard();
     }).catch(() => { ui.fetchingBatch = false; });
   }
 
@@ -1655,6 +1956,7 @@
         // The recording's own metrics, not the played count — nothing has been
         // played back yet, and the graphs are about what happened in training.
         if (ui.repaintCharts) ui.repaintCharts(batch, chartContext());
+      paintDashboard();
         // Straight to the learned route, rather than to the top of a batch of
         // exploratory episodes. Selecting it is what puts playback into
         // REPLAYING, so Play and Pause drive that one route on a loop.
@@ -1791,7 +2093,20 @@
     ui.playback.stop();
     stopLive();
     ui.running = false;
+
+    /* THE OLD RUN'S DATA GOES NOW, NOT WHEN THE FAR END ANSWERS.
+       `ui.recorded` was cleared further down, after `Producer.restart`
+       resolves -- and rebuilding room 5 regenerates 150 layouts, so that is
+       seconds during which the dashboard and the graphs were still being
+       painted from the run that had just been discarded. Measured: the cards
+       read 4000 episodes for several seconds after Reset. Cleared here, and
+       repainted, so the screen is honest from the first frame. */
+    ui.recorded = null;
+    ui.greedy = null;
+    ui.testedRoom = null;
     paintControls();
+    paintDashboard();
+    if (ui.repaintCharts) ui.repaintCharts([], chartContext());
 
     let room;
     try {
@@ -1832,6 +2147,7 @@
     buildGeneralisation();
     paintEvaluation(null);
     if (ui.repaintCharts) ui.repaintCharts([], chartContext());
+    paintDashboard();
     refit();
     paintAll();
     ui.world.draw({ room: ui.room, position: null });
@@ -2041,6 +2357,7 @@
           buildInspectorEpisodes();
           paintInspector();
           if (ui.repaintCharts) ui.repaintCharts(chartData(), chartContext());
+      paintDashboard();
         }
 
         if (dom.scrub && !dom.scrub.hidden) {
@@ -2123,6 +2440,17 @@
        declares ten, including the one that compares the frozen policy on the
        layouts it trained on against the layouts it never saw. */
     ui.repaintCharts = window.Charts.build(dom.charts, ui.room.charts);
+    // Saving what the run produced. Both are inert until there is a history to
+    // save, and neither can throw on an empty run: they return early.
+    if (dom.downloadJson) {
+      dom.downloadJson.disabled = true;
+      dom.downloadJson.addEventListener('click', downloadResults);
+    }
+    if (dom.downloadPng) {
+      dom.downloadPng.disabled = true;
+      dom.downloadPng.addEventListener('click', downloadCharts);
+    }
+    paintDashboard();
 
     // An empty batch, on purpose: nothing has been learned yet. The renderer
     // draws a room with no episode in it perfectly well — the chamber, its

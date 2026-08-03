@@ -75,6 +75,11 @@ def _info(room):
         "rewards": [list(pair) for pair in info["rewards"]],
         "terminal": info["termination"],
     }
+    # What the learner's state actually is, in words. Sent only by the rooms
+    # that say so: a continuous room's state is the thing most easily misread
+    # from the picture, so room 4 states it rather than leaving it implied.
+    if info.get("state"):
+        described["state"] = info["state"]
     if info.get("note"):
         described["note"] = info["note"]
     # Only for the rooms that are *about* a choice between routes. The screen
