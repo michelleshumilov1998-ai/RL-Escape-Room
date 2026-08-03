@@ -243,8 +243,18 @@ class DroneWorld:
         speed = math.hypot(vx, vy)
         if not self._in_pad(x, y):
             return None, speed
-        gentle = (abs(vx) <= self.landing_speed
-                  and abs(vy) <= self.landing_speed)
+        # THE TEST IS ON THE SPEED, NOT ON EACH COMPONENT.
+        # It used to be `abs(vx) <= limit and abs(vy) <= limit`, which was a
+        # real gradation while the velocity was continuous. With the velocity
+        # discrete every component is already within 1, so that form is true
+        # for every possible arrival -- the landing rule would be a no-op and
+        # `hard_landing` could never fire. The magnitude keeps three regimes:
+        #
+        #   limit < 1.0        only a full stop counts as a landing
+        #   1.0 <= limit < 1.42  arriving along one axis is a landing,
+        #                        arriving diagonally is a crash
+        #   limit >= 1.42      any arrival counts
+        gentle = speed <= self.landing_speed
         return ("landed" if gentle else "crashed"), speed
 
     def _crashed(self, state):
@@ -288,50 +298,95 @@ class DroneWorld:
         self._charged = set()
         return self.state
 
+    # How likely a zone effect is to fire on one tick, per unit of strength.
+    # `wind * dt` at wind = 1 is 0.02, so a zone shoves the drone about once a
+    # second, which is the magnitude the continuous version had: it used to add
+    # `wind * dt` to the velocity every tick, reaching one whole unit after
+    # fifty ticks. Keeping the rate identical is what lets the wind slider mean
+    # the same thing it meant before.
+    ZONE_RATE = 1.0
+
+    def _stepped(self, value, push):
+        """One unit of change, clamped to the three velocities that exist."""
+        limit = self.speed_limit
+        return max(-limit, min(limit, value + push))
+
     def step(self, action):
         """Integrate one 0.02 s tick and report what happened.
 
-        Semi-implicit Euler: the velocity is updated first and the position
-        moved with the *new* velocity. At this step size the difference from
-        the explicit form is small, but it is the stable one of the two and it
-        costs nothing.
+        THE VELOCITY IS DISCRETE. THE MOVEMENT IS NOT.
+        The assignment fixes `Vx, Vy` to {-1, 0, 1}, so an action steps a
+        velocity component by exactly one unit and the component is clamped to
+        those three values -- it is never 0.37. The *position* is still
+        continuous: `x += vx * dt` moves the drone a fraction of a metre each
+        tick, and dt is 0.02 s, so a flight is a smooth path and not a walk
+        between cells.
+
+        WHAT THAT COST, AND WHAT REPLACED IT
+        Three things in the old continuous form produce fractional velocities
+        by construction and therefore cannot survive: drag as an exponential
+        decay, wind as a fractional acceleration, and a thrust magnitude. Each
+        zone that used them is given the discrete equivalent instead, so no
+        zone becomes decoration:
+
+          wind zones   push the velocity one whole unit in the wind direction,
+                       with probability `wind * dt` per tick -- the same
+                       expected effect per second as the old acceleration.
+          slow zone    pulls the velocity one unit TOWARDS zero, at a rate set
+                       by its own `extra_drag`. This is drag, discretised.
+          boost zone   makes a thrust reach full speed in one press instead of
+                       one step at a time, which is what "overcharge" now
+                       means when a step is already the whole range.
+
+        The draws come from `self.rng`, which is seeded, so a flight is still
+        reproducible from its seed.
         """
         x, y, vx, vy = self.state
         before = self.distance_to_pad(x, y)
 
         zones = self.zones_at(x, y)
 
-        # Thrust, scaled by any zone that changes what a push is worth.
+        # 1. The action. One unit per press, or straight to full in a boost.
         push_x, push_y = THRUST[action]
-        thrust = self.thrust
-        for zone in zones:
-            thrust *= zone.get("thrust_scale", 1.0)
-        vx += push_x * thrust * self.dt
-        vy += push_y * thrust * self.dt
+        overcharged = any(zone.get("thrust_scale", 1.0) > 1.0 for zone in zones)
+        if overcharged:
+            limit = self.speed_limit
+            if push_x:
+                vx = math.copysign(limit, push_x)
+            if push_y:
+                vy = math.copysign(limit, push_y)
+        else:
+            vx = self._stepped(vx, push_x)
+            vy = self._stepped(vy, push_y)
 
-        # Wind: an acceleration that depends on where the drone is and on
-        # nothing else, so it stays a function of the state.
+        # 2. Wind: a whole-unit shove, so the velocity stays one of three.
         for zone in zones:
             wind = zone.get("wind")
-            if wind:
-                vx += wind[0] * self.wind * self.dt
-                vy += wind[1] * self.wind * self.dt
+            if not wind:
+                continue
+            chance = self.wind * self.dt * self.ZONE_RATE
+            if wind[0] and self.rng.random() < chance * abs(wind[0]):
+                vx = self._stepped(vx, math.copysign(1.0, wind[0]))
+            if wind[1] and self.rng.random() < chance * abs(wind[1]):
+                vy = self._stepped(vy, math.copysign(1.0, wind[1]))
 
-        # Drag, and any zone that adds to it. Applied as a decay over the tick
-        # rather than subtracted, so it can never push the drone backwards
-        # however large the coefficient is set.
-        drag = self.drag
+        # 3. Drag, discretised: a pull of one unit towards rest. Only the zones
+        #    that declare it -- there is no global drag any more, because a
+        #    decay applied every tick cannot leave a velocity in {-1, 0, 1}.
         for zone in zones:
-            drag += zone.get("extra_drag", 0.0)
-        decay = math.exp(-drag * self.dt)
-        vx *= decay
-        vy *= decay
+            extra = zone.get("extra_drag", 0.0)
+            if not extra:
+                continue
+            chance = extra * self.dt * self.ZONE_RATE
+            if vx and self.rng.random() < chance:
+                vx = self._stepped(vx, -math.copysign(1.0, vx))
+            if vy and self.rng.random() < chance:
+                vy = self._stepped(vy, -math.copysign(1.0, vy))
 
-        # The assignment fixes the velocity range, so it is a hard clamp and
-        # not a soft penalty.
-        limit = self.speed_limit
-        vx = max(-limit, min(limit, vx))
-        vy = max(-limit, min(limit, vy))
+        # The three values are all that exist, so this is exact rather than a
+        # tolerance. Rounding guards against a copysign leaving -0.0.
+        vx = float(round(vx))
+        vy = float(round(vy))
 
         x += vx * self.dt
         y += vy * self.dt
@@ -585,9 +640,13 @@ class DroneWorld:
             look = "landed"
         elif outcome == "crashed":
             look = "crashed"
+        # THE WARNING USES THE SAME RULE AS THE LANDING.
+        # It tested each component, which the landing no longer does -- and
+        # with a discrete velocity no component can exceed 1, so at the default
+        # limit the warning could never fire while a diagonal arrival was still
+        # a crash. The screen would have stayed calm right up to the wreck.
         elif (self.distance_to_pad(state[0], state[1]) <= self.APPROACH_RANGE
-              and (abs(state[2]) > self.landing_speed
-                   or abs(state[3]) > self.landing_speed)):
+              and speed > self.landing_speed):
             # Near, and too fast to land if it arrived now.
             look = "fast"
         else:

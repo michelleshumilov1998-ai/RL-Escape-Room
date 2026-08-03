@@ -95,7 +95,7 @@ is no build step and no bundler.
 | **1** Laser Security Chamber | Value Iteration | 10×10 grid, **known model**, stochastic surfaces | `(row, col, battery, last_direction, collapsed)` | 4 — up, down, left, right | Reach the control panel; avoid beams; battery bonus |
 | **2** Broken Bridge Sector | SARSA | 10×10 grid, model-free, stochastic | `(row, col, battery, last_direction, collapsed)` | 4 — up, down, left, right | Cross to the exit; the span is fast but can give way |
 | **3** Reactor Control Chamber | Q-Learning | 10×10 grid, model-free, delayed reward | 8-tuple: cell, keys held, generators started, patrol phase | 5 — four moves **plus WAIT** | Three keys, three generators **in order**, then the door |
-| **4** Drone Wind Tunnel | Semi-gradient SARSA | Continuous 10 × 10 m, `dt = 0.02 s` | `(x, y, vx, vy)` — metres and m/s | 5 — four thrust directions plus hold | Land on the pad **below the landing speed** |
+| **4** Drone Wind Tunnel | Semi-gradient SARSA | Continuous 10 × 10 m, `dt = 0.02 s` | `(x, y, vx, vy)` — position continuous, **velocity discrete in {−1,0,+1}** | 5 — four thrust directions plus hold | Land on the pad **below the landing speed** |
 | **5** Adaptive Storage Facility | Semi-gradient Q-Learning | Continuous 10 × 10 m, **procedurally generated**, partially observable | `(x, y, vx, vy, stage, phase)` | 5 — four thrust directions plus hold | Reach the terminal, then escape through the blast door |
 
 Each room also offers alternative methods for contrast. A comparison runs on
@@ -434,22 +434,53 @@ where Room 5 records one frame per held decision.
   harder
 * A stabilisation field damps motion
 
-### State
+### State — continuous position, **discrete velocity**
 
-`(x, y, vx, vy)` — position in metres, velocity in metres per second. Velocity
-is clamped to `|v| ≤ 1`.
+```
+(x, y, vx, vy)
+```
 
-### Actions and continuous movement
+* `x, y` — position in metres. **Continuous.**
+* `vx, vy` — velocity in metres per second. **Discrete: each is one of
+  `{−1, 0, +1}`.**
+* `dt = 0.02 s`.
 
-Five thrust inputs; each component is one of `{−1, 0, +1}`:
+This is the assignment's requirement for this room: the movement is continuous
+while the velocity is discrete. The position advances by `v · dt`, so at full
+speed the drone moves 0.02 m per tick and the flight path is smooth even though
+the velocity only ever takes three values per axis.
+
+There is **no angle and no angular velocity** in the state. The tilt drawn on
+screen is `atan2(vy, vx)` — a display value computed from the velocity for the
+picture's sake, which the learner never sees.
+
+### Actions
+
+Five discrete inputs:
 
 ```
 hold (0,0) · up (0,−1) · down (0,+1) · left (−1,0) · right (+1,0)
 ```
 
-Thrust changes where the drone is *going*, not where it *is*: the action sets
-an acceleration, drag decays the velocity, and the position is carried by the
-new velocity. Movement is therefore continuous and momentum matters.
+A thrust steps the matching velocity component by **one whole unit**, clamped to
+`{−1, 0, +1}`. From rest one press reaches full speed; reversing from full speed
+takes two presses, which is what momentum means here.
+
+### What replaced the continuous forces
+
+Three things in a continuous model produce fractional velocities by
+construction, so they cannot survive a discrete one. Each zone that used them
+was given the discrete equivalent, so no zone became decoration:
+
+| Feature | Before | Now |
+|---|---|---|
+| Global drag | `v *= exp(−drag·dt)` every tick | **Removed.** A coasting drone keeps its velocity until an action or a zone changes it |
+| Wind zones | fractional acceleration per tick | a **whole-unit shove** with probability `wind · dt` per tick — the same expected effect per second, so the wind slider means what it meant before |
+| Stabilisation field | extra drag coefficient | pulls the velocity **one unit towards rest**, at a rate set by its own coefficient |
+| Thruster overcharge | multiplied the thrust magnitude | a press reaches **full speed in one step** instead of one unit at a time — visible when reversing |
+
+The draws come from the environment's seeded RNG, so a flight is still exactly
+reproducible from its seed.
 
 ### Tile coding and function approximation
 
@@ -467,6 +498,27 @@ never sees the same bucket twice.
 
 Touching the platform is easy. Touching it **below the landing speed limit** is
 the task — arriving too fast is a crash, not a landing.
+
+The test is on the **speed magnitude**, `√(vx² + vy²) ≤ limit`, not on each
+component: with a discrete velocity no component can exceed 1, so a
+per-component test would be true for every possible arrival and the rule would
+be a no-op. The only speeds that exist are `0`, `1` and `√2 ≈ 1.41`, which gives
+the slider three real regimes:
+
+| Limit | What counts as a landing |
+|---|---|
+| below 1.0 | only a full stop |
+| 1.0 – 1.41 | an arrival along one axis; a diagonal one crashes |
+| above 1.41 | any arrival |
+
+The default is **1.0**. Measured over 1200 episodes: at 1.0 the agent lands 100%
+of the time and at 1.5 it lands 98%. Below 1.0 — where nothing but a full stop
+counts — it learns to hover instead of risking the crash penalty and does not
+land at all, so that regime is available as an experiment rather than as a
+working setting.
+
+The approach warning on screen uses the same rule, so the display cannot stay
+calm up to a wreck.
 
 ### Rewards
 
@@ -491,7 +543,7 @@ the task — arriving too fast is a crash, not a landing.
 | Tilings | 1 – 16 | 8 |
 | Buckets per axis | 3 – 20 | 8 |
 | Wind strength | 0.0 – 2.0 | 1.0 |
-| Landing speed limit | 0.05 – 1.0 | 0.30 |
+| Landing speed limit | 0.05 – 1.5 | **1.00** |
 | Episodes to train | 100 – 8000 | **1200** |
 
 ### Replay and graphs
@@ -644,7 +696,7 @@ been moved but not applied.
 | Tilings | reset | — | — | — | 8 | 8 |
 | Buckets per axis | reset | — | — | — | 8 | — |
 | Wind strength | reset | — | — | — | 1.0 | — |
-| Landing speed limit | reset | — | — | — | 0.30 | — |
+| Landing speed limit | reset | — | — | — | 1.00 | — |
 | Sensor range | reset | — | — | — | — | 3.0 m |
 | Obstacle controls | reset | — | — | — | — | drones, variation, speed, shelves |
 | Layout pools | reset | — | — | — | — | 120 / 10 / 20 |
@@ -859,7 +911,7 @@ RL-Escape-Room/
 │           ├── contract.js   the data contract, documented
 │           └── ending.js     the final victory sequence
 │
-└── tests/                    pytest suite (300 tests)
+└── tests/                    pytest suite (305 tests)
 ```
 
 ---
@@ -884,7 +936,7 @@ To run the test suite:
 
 ```bash
 pip install -r requirements.txt      # pytest, for the tests only
-python3 -m pytest                    # 300 tests
+python3 -m pytest                    # 305 tests
 ```
 
 ---

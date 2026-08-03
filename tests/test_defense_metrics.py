@@ -226,3 +226,97 @@ def test_the_declared_charts_only_name_recorded_fields():
                 assert key in rows[0], (
                     "room %d graph %r reads %r, which no episode row has"
                     % (number, chart["label"], key))
+
+
+# ----------------------------------------------------------------------
+# Room 4's discrete velocity — the assignment states it explicitly
+# ----------------------------------------------------------------------
+
+def test_room_four_velocity_is_one_of_three_values():
+    """The assignment: "המהירות שלו היא דיסקרטית: Vy, Vx: -1, 0, 1".
+
+    Every velocity the environment can ever report must be -1, 0 or +1 on
+    each axis. Driven with random actions across whole episodes, including
+    through the wind, slow and boost zones, so no code path is skipped.
+    """
+    import random
+    from game.session import Session
+
+    env = Session(4).env
+    env.reset(seed=1)
+    seen = set()
+    for step in range(4000):
+        state, _reward, done, _info = env.step(
+            random.Random(step).randrange(len(env.actions())))
+        seen.add(state[2])
+        seen.add(state[3])
+        if done:
+            env.reset(seed=step)
+    assert seen, "no state was produced"
+    assert seen <= {-1.0, 0.0, 1.0}, (
+        "velocity took values outside {-1, 0, 1}: %s"
+        % sorted(v for v in seen if v not in (-1.0, 0.0, 1.0))[:8])
+
+
+def test_room_four_position_is_still_continuous():
+    """Discrete velocity, continuous movement: x moves by v*dt, not by a cell."""
+    from game.session import Session
+    env = Session(4).env
+    env.reset(seed=0)
+    env.state = (5.0, 5.0, 0.0, 0.0)
+    before = env.state[0]
+    env.step(4)                                  # RIGHT
+    after = env.state[0]
+    moved = after - before
+    assert moved == pytest.approx(1.0 * env.dt), (
+        "one tick at unit speed must move exactly dt metres")
+    assert 0 < moved < 0.1, "a tick must not jump a whole cell"
+
+
+def test_room_four_one_press_is_one_whole_unit():
+    from game.session import Session
+    env = Session(4).env
+    env.reset(seed=0)
+    env.state = (1.5, 8.2, 0.0, 0.0)             # clear of every zone
+    assert env.step(4)[0][2] == pytest.approx(1.0)     # RIGHT: 0 -> +1
+    env.state = (1.5, 8.2, 1.0, 0.0)
+    assert env.step(3)[0][2] == pytest.approx(0.0)     # LEFT:  +1 -> 0
+    env.state = (1.5, 8.2, 0.0, 0.0)
+    assert env.step(3)[0][2] == pytest.approx(-1.0)    # LEFT:  0 -> -1
+
+
+def test_room_four_still_learns_to_land():
+    """The physics changed, so this is the check that matters."""
+    from collections import Counter
+    from game.session import Session
+    session = Session(4, parameters={"episodes": 1200})
+    session.play()
+    while session.state == "TRAINING":
+        session.advance(budget_ms=120.0)
+    recent = session.batch()["history"][-200:]
+    landed = sum(row["success"] for row in recent) / len(recent)
+    assert landed > 0.6, (
+        "only %.0f%% of the last 200 episodes landed: %s"
+        % (100 * landed, dict(Counter(r["outcome"] for r in recent))))
+
+
+def test_the_landing_rule_and_the_approach_warning_agree():
+    """A screen that stays calm up to the wreck is worse than no warning."""
+    from game.session import Session
+    env = Session(4).env
+    pad = env.pad
+    limit = env.landing_speed
+
+    def look(state):
+        return env.frame_extras(state)[0][0]["state"]
+
+    # On the pad: within the limit lands, beyond it crashes.
+    assert look((pad["x"], pad["y"], 0.0, 0.0)) == "landed"
+    assert look((pad["x"], pad["y"], 1.0, 0.0)) == "landed"
+    assert look((pad["x"], pad["y"], 1.0, 1.0)) == "crashed"
+    # Approaching: the warning fires for exactly the velocities that would
+    # crash, and for no others.
+    near = (pad["x"], pad["y"] + 1.2)
+    assert look((near[0], near[1], 1.0, -1.0)) == "fast"
+    assert look((near[0], near[1], 0.0, -1.0)) == "clear"
+    assert math.hypot(1.0, 1.0) > limit >= 1.0

@@ -631,8 +631,11 @@ ROOM4 = {
     "speed_limit": 1.0,
 
     "start": (1.5, 8.2),
+    # The velocity is discrete, so the only speeds that exist are 0, 1 and
+    # sqrt(2). At 1.0 an arrival along one axis lands and a diagonal one is a
+    # crash; below 1.0 nothing but a full stop counts. See `config.PARAMETERS`.
     "pad": {"x": 8.2, "y": 1.6, "width": 1.6, "height": 0.9,
-            "landing_speed": 0.30},
+            "landing_speed": 1.00},
 
     "pillars": [
         {"x": 4.3, "y": 5.5, "radius": 0.95},
@@ -789,7 +792,7 @@ ROOM4 = {
             "shortens the route, at 5 to enter — and it is much harder to "
             "arrive slowly out of it.",
         ],
-        "actions": "Hold, or thrust up, down, left or right. Thrust is an "
+        "actions": "Hold, or thrust up, down, left or right. A thrust steps the matching velocity component by one unit within {-1, 0, +1}; it is not a move from one square to the next. Two presses are needed to reverse a direction, which is what momentum means here."
                    "acceleration, not a move: nothing here steps from one "
                    "square to the next.",
         "rewards": [
@@ -809,10 +812,12 @@ ROOM4 = {
         # angular velocity: the tilt the renderer draws is atan2(vy, vx), a
         # display value computed from the velocity for the picture's sake, and
         # the learner never sees it.
-        "state": "Four continuous numbers: (x, y, vx, vy). x and y are the "
-                 "position in metres; vx and vy are the velocity components in "
-                 "metres per second, each clamped to the range [-1, 1]. The "
-                 "world advances in steps of dt = 0.02 s. There is no angle "
+        "state": "(x, y, vx, vy). x and y are the position in metres and are "
+                 "continuous. vx and vy are the velocity components and are "
+                 "DISCRETE: each is one of -1, 0 or +1 metres per second. The "
+                 "world advances in steps of dt = 0.02 s, so the position "
+                 "moves a fraction of a metre per tick and the flight path is "
+                 "smooth even though the velocity is not. There is no angle "
                  "and no angular velocity in the state \u2014 the tilt drawn "
                  "on screen is atan2(vy, vx), a display value only.",
         "note": "This is the room where a table stops working. The state is "

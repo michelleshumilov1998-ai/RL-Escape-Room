@@ -96,17 +96,24 @@ def test_each_thrust_acts_on_its_own_axis(env, action, axis, sign):
     other = 3 if axis == 2 else 2
     assert state[axis] * sign > 0
     assert state[other] == pytest.approx(0.0)
-    # One tick of thrust, less the drag applied over that tick.
-    expected = env.thrust * env.dt * math.exp(-env.drag * env.dt)
-    assert abs(state[axis]) == pytest.approx(expected, rel=1e-9)
+    # THE VELOCITY IS DISCRETE. One press moves the component by one whole
+    # unit, so from rest a single thrust reaches the speed limit exactly.
+    assert abs(state[axis]) == pytest.approx(env.speed_limit)
+    assert state[axis] in (-1.0, 0.0, 1.0)
 
 
-def test_drag_bleeds_speed_off_when_coasting(env):
+def test_coasting_keeps_the_velocity_because_there_is_no_global_drag(env):
+    """A decay applied every tick cannot leave a velocity in {-1, 0, 1}.
+
+    So there is no global drag: a coasting drone keeps its velocity until an
+    action or a zone changes it. Only the slow zone bleeds speed, and it does
+    so one whole unit at a time -- see the slow-zone test below.
+    """
     env.reset()
-    env.state = (5.0, 5.0, 1.0, 0.0)
+    # Well away from any zone, so nothing but the action can act on it.
+    env.state = (1.5, 8.2, 1.0, 0.0)
     state, _, _, _ = env.step(HOLD)
-    assert state[2] < 1.0
-    assert state[2] == pytest.approx(math.exp(-env.drag * env.dt), rel=1e-9)
+    assert state[2] == pytest.approx(1.0)
 
 
 def test_position_integrates_with_the_updated_velocity(env):
@@ -128,13 +135,28 @@ def test_position_integrates_with_the_updated_velocity(env):
 # ----------------------------------------------------------------------
 
 def test_wind_pushes_in_the_declared_direction(env):
+    """A whole unit, and only in the direction the zone declares.
+
+    With a discrete velocity the wind cannot add a fraction each tick, so it
+    shoves the component a full unit with a probability per tick instead. Over
+    many ticks the drone must end up moving the way the zone blows.
+    """
     zone = next(z for z in env.zones if z.get("wind"))
-    env.reset()
-    env.state = (zone["x"], zone["y"], 0.0, 0.0)
-    state, _, _, _ = env.step(HOLD)
-    # The zone in this room blows downwards, so vy grows with no thrust at all.
-    assert zone["wind"][1] > 0
-    assert state[3] > 0
+    assert zone["wind"][1] > 0, "this room's zone blows downwards"
+    pushed = 0
+    for seed in range(60):
+        env.reset(seed=seed)
+        env.state = (zone["x"], zone["y"], 0.0, 0.0)
+        for _ in range(120):
+            state, _, done, _ = env.step(HOLD)
+            if state[3] > 0:
+                pushed += 1
+                break
+            if done:
+                break
+        # It is never pushed the wrong way.
+        assert state[3] >= 0
+    assert pushed > 0, "the wind never moved the drone in 60 attempts"
 
 
 def test_wind_is_absent_outside_its_zone(env):
@@ -166,37 +188,87 @@ def test_wind_is_deterministic_for_the_same_state(env):
         assert other[2] == first[2]
 
 
-def test_wind_strength_scales_the_force():
+def test_wind_strength_scales_how_often_it_shoves():
+    """Calm means never; stronger means sooner, on average."""
+    def ticks_until_pushed(strength, seeds=40):
+        chamber = world(wind=strength)
+        zone = next(z for z in chamber.zones if z.get("wind"))
+        total = 0
+        for seed in range(seeds):
+            chamber.reset(seed=seed)
+            chamber.state = (zone["x"], zone["y"], 0.0, 0.0)
+            waited = 300
+            for tick in range(300):
+                state, _, done, _ = chamber.step(HOLD)
+                if state[3] > 0:
+                    waited = tick + 1
+                    break
+                if done:
+                    break
+            total += waited
+        return total / seeds
+
     calm = world(wind=0.0)
-    blowing = world(wind=2.0)
     zone = next(z for z in calm.zones if z.get("wind"))
-    moved = []
-    for chamber in (calm, blowing):
-        chamber.reset()
-        chamber.state = (zone["x"], zone["y"], 0.0, 0.0)
-        moved.append(chamber.step(HOLD)[0][3])
-    assert moved[0] == pytest.approx(0.0)
-    assert moved[1] > 0
+    calm.reset()
+    calm.state = (zone["x"], zone["y"], 0.0, 0.0)
+    for _ in range(200):
+        assert calm.step(HOLD)[0][3] == pytest.approx(0.0), (
+            "a calm chamber must never shove")
+
+    assert ticks_until_pushed(2.0) < ticks_until_pushed(0.5), (
+        "a stronger wind must shove sooner on average")
 
 
-def test_slow_zone_increases_drag(env):
+def test_slow_zone_bleeds_speed_a_whole_unit_at_a_time(env):
+    """Drag, discretised: inside the zone a coasting drone comes to rest.
+
+    Outside it nothing slows the drone at all, because a per-tick decay cannot
+    leave a velocity in {-1, 0, 1}.
+    """
     zone = next(z for z in env.zones if z.get("extra_drag"))
-    outside, inside = [], []
-    for target, position in ((outside, (9.4, 9.4)), (inside, (zone["x"], zone["y"]))):
-        env.reset()
-        env.state = (position[0], position[1], 1.0, 0.0)
-        target.append(env.step(HOLD)[0][2])
-    assert inside[0] < outside[0]
+
+    # Outside: it coasts for ever.
+    env.reset(seed=0)
+    env.state = (1.5, 8.2, 1.0, 0.0)
+    for _ in range(50):
+        assert env.step(HOLD)[0][2] == pytest.approx(1.0)
+
+    # Inside: it is pulled to rest, in one whole step, within a second or so.
+    stopped = 0
+    for seed in range(40):
+        env.reset(seed=seed)
+        env.state = (zone["x"], zone["y"], 1.0, 0.0)
+        for _ in range(150):
+            state, _, done, _ = env.step(HOLD)
+            assert state[2] in (0.0, 1.0), "it must never overshoot past rest"
+            if state[2] == 0.0:
+                stopped += 1
+                break
+            if done:
+                break
+    assert stopped > 20, "the slow zone stopped the drone only %d times" % stopped
 
 
-def test_boost_zone_scales_thrust(env):
+def test_boost_zone_reaches_full_speed_in_one_press(env):
+    """What "overcharge" means once a step is already the whole range.
+
+    A thrust normally moves the velocity one unit. From rest that is already
+    the limit, so the zone shows itself where it matters: reversing. Outside
+    the zone, turning around from full speed takes two presses; inside, one.
+    """
     zone = next(z for z in env.zones if z.get("thrust_scale"))
-    plain, boosted = [], []
-    for target, position in ((plain, (9.4, 9.4)), (boosted, (zone["x"], zone["y"]))):
-        env.reset()
-        env.state = (position[0], position[1], 0.0, 0.0)
-        target.append(abs(env.step(RIGHT)[0][2]))
-    assert boosted[0] == pytest.approx(plain[0] * zone["thrust_scale"], rel=1e-6)
+    assert zone["thrust_scale"] > 1.0
+
+    # Outside: one press only cancels the motion.
+    env.reset(seed=0)
+    env.state = (1.5, 8.2, -1.0, 0.0)
+    assert env.step(RIGHT)[0][2] == pytest.approx(0.0)
+
+    # Inside: one press reverses it outright.
+    env.reset(seed=0)
+    env.state = (zone["x"], zone["y"], -1.0, 0.0)
+    assert env.step(RIGHT)[0][2] == pytest.approx(env.speed_limit)
 
 
 def test_boost_penalty_is_charged_once_per_visit(env):
@@ -402,7 +474,9 @@ def test_a_safe_landing_needs_both_components_below_the_threshold(env):
 def test_arriving_too_fast_is_a_hard_landing_not_a_success(env):
     pad = env.pad
     env.reset()
-    env.state = (pad["x"], pad["y"], env.landing_speed * 3, 0.0)
+    # Diagonal at full speed: |v| = sqrt(2), above the 1.0 limit. Multiplying
+    # the limit no longer works, because a component can never exceed 1.
+    env.state = (pad["x"], pad["y"], 1.0, 1.0)
     state, reward, done, info = env.step(HOLD)
     assert done
     assert not info["goal"]
@@ -450,9 +524,15 @@ def test_the_platform_state_comes_from_the_environment(env):
         return states[0]["state"]
 
     assert look((pad["x"], pad["y"], 0.0, 0.0)) == "landed"
-    assert look((pad["x"], pad["y"], 1.0, 0.0)) == "crashed"
-    # Near and too fast: a warning, but nothing has happened yet.
-    assert look((pad["x"], pad["y"] + 1.2, 0.0, -1.0)) == "fast"
+    # One axis at full speed is |v| = 1, which is within the 1.0 limit; a
+    # diagonal arrival is sqrt(2) and is not.
+    assert look((pad["x"], pad["y"], 1.0, 0.0)) == "landed"
+    assert look((pad["x"], pad["y"], 1.0, 1.0)) == "crashed"
+    # Near and too fast: a warning, but nothing has happened yet. Too fast now
+    # means |v| above the limit, and only a diagonal reaches that -- a single
+    # axis at full speed is exactly 1.0 and is a legal approach.
+    assert look((pad["x"], pad["y"] + 1.2, 1.0, -1.0)) == "fast"
+    assert look((pad["x"], pad["y"] + 1.2, 0.0, -1.0)) == "clear"
     assert look((env.start_position[0], env.start_position[1], 0.0, 0.0)) == "clear"
 
 
@@ -462,9 +542,13 @@ def test_progress_shaping_is_symmetric(env):
     A shaping term that rewarded approach without charging for retreat would
     make orbiting the platform more profitable than landing on it.
     """
-    # Open air: clear of every pillar, every zone and the pad. (5, 5) is not —
-    # it is inside the first turbine housing, which cost this test a run.
-    clear = (5.6, 7.6, 0.0, 0.0)
+    # Open air, and level with the pad on the y axis, so a step left and a
+    # step right are exact mirror images. Off that line the two moves change
+    # the straight-line distance by slightly different amounts -- a property
+    # of the geometry, not of the shaping -- and the old fixture sat off it,
+    # which showed up as a 0.0003 asymmetry once the velocity became exactly
+    # one unit per tick.
+    clear = (5.6, env.pad["y"], 0.0, 0.0)
     assert not env._crashed(clear)
     assert env.zones_at(clear[0], clear[1]) == []
 
