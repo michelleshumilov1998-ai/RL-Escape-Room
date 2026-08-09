@@ -1,0 +1,39 @@
+# Render blueprint — PROJECT R-5.
+#
+# WHY THIS FILE IS SO SHORT
+# The project has no build step, no bundler, no database and no third-party
+# runtime dependency, so there is nothing here to configure. `serve.py` reads
+# $PORT and binds every interface when it sees one; the pages ask for
+# `/api/...` relative to wherever they were loaded from. That is the whole of
+# what hosting this needs.
+#
+# To deploy: Render dashboard -> New -> Blueprint -> pick this repository.
+# Everything below is then read from here rather than typed into a form.
+
+services:
+  - type: web
+    name: project-r5
+    runtime: python
+    plan: free
+    region: frankfurt
+    # pytest, and only pytest. The application itself needs nothing, but the
+    # file has to be installable or the build step has nothing to do.
+    buildCommand: pip install -r requirements.txt
+    startCommand: python serve.py
+    # The root serves the start screen, so the default health check is already
+    # a real check of the thing being deployed.
+    healthCheckPath: /
+    envVars:
+      # Not strictly needed — `serve.py` infers it from $PORT — but a service
+      # that states where it listens is easier to debug than one that deduces
+      # it.
+      - key: HOST
+        value: 0.0.0.0
+      # The free instance has 512 MB. A room 5 session holds a 4000-entry
+      # episode log and two dozen recorded episodes, so the twelve that are
+      # comfortable on a laptop are not comfortable here. Six is the cap that
+      # keeps a busy afternoon inside the memory the plan gives.
+      - key: SESSIONS_MAX
+        value: "6"
+      - key: PYTHON_VERSION
+        value: "3.11.9"

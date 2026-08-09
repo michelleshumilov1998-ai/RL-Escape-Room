@@ -1154,6 +1154,8 @@ RL-Escape-Room/
 ├── serve.py                  standard-library HTTP server and JSON API
 ├── requirements.txt          pytest only; the app itself needs nothing
 ├── pytest.ini
+├── render.yaml               the hosting blueprint: one web service, no build
+├── Procfile                  the same start command, for platforms that read one
 │
 ├── experiments/
 │   └── measure_parameters.py  reproduces every "settings that solve it" table
@@ -1229,6 +1231,43 @@ trains the rooms through the same code the server does:
 python3 experiments/measure_parameters.py --room 1   # seconds
 python3 experiments/measure_parameters.py --room 5   # about half an hour
 ```
+
+---
+
+## Deployment
+
+The game is a Python process that serves its own files, so hosting it needs a
+platform that runs a process rather than one that serves a directory. It is
+deployed on **Render** as a single web service, from `render.yaml` in this
+repository.
+
+**What hosting actually required.** Two variables, and no code beyond reading
+them:
+
+| Variable | Default | What it is for |
+|---|---|---|
+| `PORT` | 8000 | The port to listen on. A platform assigns it. |
+| `HOST` | `127.0.0.1` locally, `0.0.0.0` when `PORT` is set | Which interfaces to accept connections on. A container that binds only the loopback address is unreachable from outside itself. |
+| `SESSIONS_MAX` | 12 | How many live sessions to hold before dropping the oldest. Lowered to 6 on the free instance, which has 512 MB. |
+
+None of the three is a secret, and the project has no others: there is no
+database, no API key, no account and no build step. The pages request
+`/api/...` relative to whatever host served them, so the same files work at
+`localhost:8000` and at a public URL with nothing switched between them.
+
+**To deploy it again, or somewhere else.** On Render: *New → Blueprint*, point
+it at this repository, and `render.yaml` supplies the rest. On anything that
+reads a `Procfile` the start command is already there. By hand, anywhere:
+
+```bash
+PORT=10000 python3 serve.py       # binds 0.0.0.0:10000
+```
+
+**What the free instance costs.** It sleeps after about fifteen minutes without
+traffic and takes roughly a minute to wake, so the first visit after a quiet
+period is slow and every one after it is not. Training state lives in memory, so
+a restart ends any run in progress — which matters for a demonstration only in
+that a run should be started after the site is awake, not before.
 
 ---
 

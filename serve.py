@@ -32,8 +32,25 @@ from game import config, rooms
 from game.comparison import Comparison
 from game.session import IllegalTransition, Session
 
-HOST = "127.0.0.1"
-PORT = 8000
+# WHERE TO LISTEN, LOCALLY AND WHEN HOSTED
+#
+# Locally these two defaults are the right ones and nothing has to be set:
+# 127.0.0.1 keeps a development server off the local network, and 8000 is the
+# port the README tells the reader to open.
+#
+# A hosting platform works the other way round. It hands the process a port in
+# $PORT and expects the server to accept connections from outside its
+# container — and 127.0.0.1 accepts none of them, so a server bound there looks
+# to the platform like a process that started and never came up. Hence: an
+# explicit $HOST wins; failing that, the presence of $PORT is taken as "this is
+# not a laptop" and the server binds every interface.
+#
+# Nothing above the socket knows about either. The pages ask for `/api/...`
+# relative to whatever host they were loaded from, so the same build serves
+# localhost and a public URL without a setting between them.
+HOST = os.environ.get("HOST") or (
+    "0.0.0.0" if os.environ.get("PORT") else "127.0.0.1")
+PORT = int(os.environ.get("PORT") or 8000)
 
 ROOT = os.path.dirname(os.path.abspath(__file__))
 WEB_ROOT = os.path.join(ROOT, "web")
@@ -45,7 +62,13 @@ SESSIONS_LOCK = threading.Lock()
 
 # A session is small, but a page that crashes cannot clean up after itself,
 # so the oldest are dropped rather than accumulating forever.
-SESSIONS_MAX = 12
+#
+# Configurable because the ceiling that matters is memory, and how much there
+# is depends on where this is running. A room 5 session carries a 4000-entry
+# episode log and two dozen recorded episodes; twelve of those are comfortable
+# on a laptop and are most of a small free-tier container. Lower it there
+# rather than discovering the limit as a restart mid-training.
+SESSIONS_MAX = int(os.environ.get("SESSIONS_MAX") or 12)
 
 
 def _json_safe(value):
@@ -378,8 +401,16 @@ def main():
 
     print("PROJECT R-5")
     print("  serving %s" % WEB_ROOT)
-    print("  open http://%s:%d" % (HOST, PORT))
+    if HOST == "0.0.0.0":
+        # Printing "open http://0.0.0.0:10000" would be an instruction that
+        # does not work. On a platform the address is the one it publishes.
+        print("  listening on 0.0.0.0:%d (every interface)" % PORT)
+    else:
+        print("  open http://%s:%d" % (HOST, PORT))
     print("  ctrl-c to stop")
+    # Unbuffered enough to reach a platform's log viewer at the moment it
+    # happens rather than whenever the pipe fills.
+    sys.stdout.flush()
     try:
         server.serve_forever()
     except KeyboardInterrupt:

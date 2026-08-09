@@ -3,10 +3,20 @@ __pycache__/
 *.pyc
 .pytest_cache/
 
-# PyCharm local state
-.idea/workspace.xml
-.idea/shelf/
+# Editor and IDE state. All of it is local: which SDK this machine calls
+# "Python 3.9", where PyCharm keeps its inspection profile, which directory it
+# has decided is under version control. None of it describes the project, and a
+# reader cloning this repository should get the project and nothing else.
+.idea/
+.vscode/
 
 # Local tooling caches (project settings under .claude/ stay tracked)
 .claude/transcript-uploader/
 .DS_Store
+
+# Environment files. The project needs no secret to run — HOST, PORT and
+# SESSIONS_MAX are the only variables it reads and none of them is one — but a
+# .env written locally must not be the thing that changes that.
+.env
+.env.*
+!.env.example
