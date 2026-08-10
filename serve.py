@@ -34,23 +34,24 @@ from game.session import IllegalTransition, Session
 
 # WHERE TO LISTEN, LOCALLY AND WHEN HOSTED
 #
-# Locally these two defaults are the right ones and nothing has to be set:
-# 127.0.0.1 keeps a development server off the local network, and 8000 is the
-# port the README tells the reader to open.
+# A hosting platform hands the process a port in $PORT and expects the server
+# to accept connections from outside its container. 127.0.0.1 accepts none of
+# them, so a server bound there looks to the platform like a process that
+# started and never came up — hence 0.0.0.0, every interface, by default.
 #
-# A hosting platform works the other way round. It hands the process a port in
-# $PORT and expects the server to accept connections from outside its
-# container — and 127.0.0.1 accepts none of them, so a server bound there looks
-# to the platform like a process that started and never came up. Hence: an
-# explicit $HOST wins; failing that, the presence of $PORT is taken as "this is
-# not a laptop" and the server binds every interface.
+# $HOST overrides it, for anyone who wants a development server that the rest
+# of the local network cannot reach:
+#
+#     HOST=127.0.0.1 python3 serve.py
+#
+# The port falls back to 8000, so `python3 serve.py` with nothing set is the
+# same http://localhost:8000 the README has always told the reader to open.
 #
 # Nothing above the socket knows about either. The pages ask for `/api/...`
-# relative to whatever host they were loaded from, so the same build serves
-# localhost and a public URL without a setting between them.
-HOST = os.environ.get("HOST") or (
-    "0.0.0.0" if os.environ.get("PORT") else "127.0.0.1")
-PORT = int(os.environ.get("PORT") or 8000)
+# relative to whatever host they were loaded from, so the same files serve
+# localhost and a public URL with no setting between them.
+HOST = os.environ.get("HOST", "0.0.0.0")
+PORT = int(os.environ.get("PORT", "8000"))
 
 ROOT = os.path.dirname(os.path.abspath(__file__))
 WEB_ROOT = os.path.join(ROOT, "web")
@@ -402,9 +403,11 @@ def main():
     print("PROJECT R-5")
     print("  serving %s" % WEB_ROOT)
     if HOST == "0.0.0.0":
-        # Printing "open http://0.0.0.0:10000" would be an instruction that
-        # does not work. On a platform the address is the one it publishes.
+        # "open http://0.0.0.0:8000" is an instruction that does not work, so
+        # print the address that does. On a platform the public address is the
+        # one it publishes, and this line is only ever read in its log.
         print("  listening on 0.0.0.0:%d (every interface)" % PORT)
+        print("  open http://localhost:%d" % PORT)
     else:
         print("  open http://%s:%d" % (HOST, PORT))
     print("  ctrl-c to stop")
