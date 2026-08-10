@@ -1,5 +1,16 @@
 # Project R-5 — A Reinforcement Learning Escape Room
 
+### ▶ Play it: **<https://project-r5.onrender.com>**
+
+Nothing to install. [Chamber select](https://project-r5.onrender.com/levels/) ·
+[source](https://github.com/michelleshumilov1998-ai/RL-Escape-Room)
+
+> The free instance sleeps after about fifteen minutes without traffic, so the
+> first visit after a quiet period takes a minute to wake. Every visit after it
+> is immediate.
+
+---
+
 An interactive escape room in which every door is opened by a different
 reinforcement learning method. Nothing in the game is scripted: in each of the
 five chambers the agent begins knowing nothing, and the player watches it work
@@ -1203,6 +1214,9 @@ RL-Escape-Room/
 
 ## Running locally
 
+There is a hosted copy at <https://project-r5.onrender.com> if you would rather
+not run anything. To run it yourself:
+
 **Requirements:** Python 3.9 or newer. Nothing else.
 
 ```bash
@@ -1235,6 +1249,9 @@ python3 experiments/measure_parameters.py --room 5   # about half an hour
 ---
 
 ## Deployment
+
+**Live at <https://project-r5.onrender.com>** — the chamber select is at
+[`/levels/`](https://project-r5.onrender.com/levels/).
 
 The game is a Python process that serves its own files, so hosting it needs a
 platform that runs a process rather than one that serves a directory. It is
